@@ -1,0 +1,28 @@
+# ── Go ────────────────────────────────────────────────────
+bin/
+coverage.out
+coverage.html
+*.test
+
+# ── CDK / Node ────────────────────────────────────────────
+infra/node_modules/
+infra/dist/
+infra/cdk.out/
+infra/.cdk.staging/
+
+# ── AWS ───────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+cdk.context.json    # valores resueltos por CDK (no commitear en equipos grandes)
+
+# ── OS ────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ───────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo

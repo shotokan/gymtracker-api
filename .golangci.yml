@@ -1,0 +1,42 @@
+# golangci-lint v2 configuration
+# Docs: https://golangci-lint.run/usage/configuration/
+version: "2"
+
+formatters:
+  enable:
+    - gofumpt # strict gofmt superset (formatter, not linter)
+
+linters:
+  enable:
+    - errcheck # checks for unchecked errors
+    - govet # reports suspicious constructs
+    - staticcheck # advanced static analysis
+    - revive # modern replacement for golint
+    - gosec # security vulnerability checks
+    - wrapcheck # errors must be wrapped with %w
+    - noctx # http requests must receive a context
+    - unparam # detects params that always receive the same value
+
+  # Linter-specific settings (replaces top-level linters-settings in v1)
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: error-return
+        - name: error-naming
+        - name: var-naming
+
+    gosec:
+      excludes:
+        - G115 # allow controlled uint/int conversions
+
+  # Exclusion rules (replaces issues.exclude-rules in v1)
+  exclusions:
+    paths:
+      - infra/node_modules
+    rules:
+      - path: "_test.go"
+        linters:
+          - wrapcheck # test helpers don't need wrapped errors
+          - exhaustruct # test structs don't need full initialization
+          - gosec # test files may contain fake credentials and hardcoded values
