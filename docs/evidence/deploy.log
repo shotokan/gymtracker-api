@@ -1,0 +1,30 @@
+deployment "traefik" successfully rolled out
+namespace/gymtracker created
+secret/gymtracker-secrets created
+namespace/gymtracker configured
+resourcequota/gymtracker-quota created
+serviceaccount/finops-scaler created
+serviceaccount/gymtracker-api created
+role.rbac.authorization.k8s.io/finops-scaler created
+rolebinding.rbac.authorization.k8s.io/finops-scaler created
+configmap/gymtracker-config created
+configmap/gymtracker-local-config created
+secret/gymtracker-local-credentials created
+service/dynamodb-local created
+service/gymtracker-api created
+limitrange/gymtracker-defaults created
+deployment.apps/dynamodb-local created
+deployment.apps/gymtracker-api created
+cronjob.batch/finops-scale-down created
+cronjob.batch/finops-scale-up created
+poddisruptionbudget.policy/gymtracker-api created
+horizontalpodautoscaler.autoscaling/gymtracker-api created
+prometheusrule.monitoring.coreos.com/gymtracker-api created
+servicemonitor.monitoring.coreos.com/gymtracker-api created
+ingress.networking.k8s.io/gymtracker-api created
+networkpolicy.networking.k8s.io/gymtracker-api created
+configmap/gymtracker-dashboard created
+Waiting for deployment "dynamodb-local" rollout to finish: 0 of 1 updated replicas are available...
+deployment "dynamodb-local" successfully rolled out
+Waiting for deployment "gymtracker-api" rollout to finish: 0 of 1 updated replicas are available...
+deployment "gymtracker-api" successfully rolled out

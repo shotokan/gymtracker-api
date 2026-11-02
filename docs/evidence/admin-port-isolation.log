@@ -1,0 +1,3 @@
+/metrics por el Ingress: 404
+/healthz por el Ingress: 404
+/readyz por el Ingress: 404

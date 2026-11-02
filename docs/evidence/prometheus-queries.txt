@@ -1,0 +1,40 @@
+── Objetivos de Prometheus para la API
+[
+  {
+    "job": "gymtracker-api",
+    "pod": "gymtracker-api-85bcc6f967-6bbc2",
+    "health": "up",
+    "lastError": ""
+  }
+]
+── Peticiones totales por ruta y código
+577	200	/auth/login
+3	401	/auth/login
+1	401	/plans
+1	201	/plans
+1	200	/plans/active
+1	204	/plans/{planId}/activate
+1	201	/plans/{planId}/routines
+1	200	/plans/{planId}/routines/{routineId}/exercises
+1	201	/plans/{planId}/routines/{routineId}/exercises
+1	200	/sessions
+1	201	/sessions
+1	200	/sessions/{sessionId}
+2	200	/users
+1	403	/users
+3	201	/users
+1	409	/users
+1	204	/users/{id}
+1	200	/users/{id}
+1	401	/users/{id}
+2	403	/users/{id}
+1	204	/users/{id}/activate
+1	403	/users/{id}/activate
+── Latencia p95, en segundos, en los últimos 15 minutos
+2.254020926355263
+── Máximo de réplicas del HPA en los últimos 30 minutos
+5
+── Reglas de alerta cargadas
+inactive	GymTrackerHighErrorRate
+pending	GymTrackerHighLatency
+inactive	GymTrackerAtMaxReplicas

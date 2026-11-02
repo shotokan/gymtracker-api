@@ -1,0 +1,77 @@
+Client Version: v1.37.1
+Kustomize Version: v5.8.1
+Server Version: v1.37.0
+NAME       STATUS   ROLES           AGE     VERSION   INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION             CONTAINER-RUNTIME
+minikube   Ready    control-plane   8m15s   v1.37.0   192.168.49.2   <none>        Debian GNU/Linux 12 (bookworm)   7.0.0-1017-azure (amd64)   containerd://2.3.4
+NAME                             READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES                                                                         SELECTOR
+deployment.apps/dynamodb-local   1/1     1            1           6m43s   dynamodb     amazon/dynamodb-local:3.3.2                                                    app.kubernetes.io/name=dynamodb-local
+deployment.apps/gymtracker-api   1/1     1            1           6m43s   api          ghcr.io/shotokan/gymtracker-api:sha-55512f1e3b1bd360b8dd87b7b201d8018288c126   app.kubernetes.io/name=gymtracker-api
+
+NAME                                        DESIRED   CURRENT   READY   AGE     CONTAINERS   IMAGES                                                                         SELECTOR
+replicaset.apps/dynamodb-local-5d969fc86c   1         1         1       6m43s   dynamodb     amazon/dynamodb-local:3.3.2                                                    app.kubernetes.io/name=dynamodb-local,pod-template-hash=5d969fc86c
+replicaset.apps/gymtracker-api-85bcc6f967   1         1         1       6m43s   api          ghcr.io/shotokan/gymtracker-api:sha-55512f1e3b1bd360b8dd87b7b201d8018288c126   app.kubernetes.io/name=gymtracker-api,pod-template-hash=85bcc6f967
+
+NAME                                  READY   STATUS      RESTARTS   AGE     IP            NODE       NOMINATED NODE   READINESS GATES
+pod/dynamodb-local-5d969fc86c-2qb4n   1/1     Running     0          6m43s   10.244.0.12   minikube   <none>           <none>
+pod/gymtracker-api-85bcc6f967-6bbc2   1/1     Running     0          6m43s   10.244.0.11   minikube   <none>           <none>
+pod/gymtracker-loadtest-hh67t         0/1     Completed   0          6m21s   10.244.0.16   minikube   <none>           <none>
+pod/gymtracker-loadtest-kjv9k         0/1     Completed   0          6m21s   10.244.0.13   minikube   <none>           <none>
+pod/gymtracker-loadtest-x4ltm         0/1     Completed   0          6m21s   10.244.0.15   minikube   <none>           <none>
+pod/gymtracker-loadtest-zllkr         0/1     Completed   0          6m21s   10.244.0.14   minikube   <none>           <none>
+
+NAME                     TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)           AGE     SELECTOR
+service/dynamodb-local   ClusterIP   10.101.79.36   <none>        8000/TCP          6m43s   app.kubernetes.io/name=dynamodb-local
+service/gymtracker-api   ClusterIP   10.100.83.95   <none>        80/TCP,9090/TCP   6m43s   app.kubernetes.io/name=gymtracker-api
+
+NAME                                       CLASS     HOSTS              ADDRESS   PORTS   AGE
+ingress.networking.k8s.io/gymtracker-api   traefik   gymtracker.local             80      6m42s
+
+NAME                                                 REFERENCE                   TARGETS       MINPODS   MAXPODS   REPLICAS   AGE
+horizontalpodautoscaler.autoscaling/gymtracker-api   Deployment/gymtracker-api   cpu: 1%/70%   1         5         1          6m42s
+
+NAME                                        MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+poddisruptionbudget.policy/gymtracker-api   N/A             1                 1                     6m43s
+
+NAME                              SCHEDULE       TIMEZONE              SUSPEND   ACTIVE   LAST SCHEDULE   AGE     CONTAINERS   IMAGES                            SELECTOR
+cronjob.batch/finops-scale-down   0 20 * * 1-5   America/Mexico_City   False     0        <none>          6m43s   kubectl      registry.k8s.io/kubectl:v1.37.2   <none>
+cronjob.batch/finops-scale-up     0 7 * * 1-5    America/Mexico_City   False     0        <none>          6m43s   kubectl      registry.k8s.io/kubectl:v1.37.2   <none>
+
+NAME                            STATUS     COMPLETIONS   DURATION   AGE     CONTAINERS   IMAGES                   SELECTOR
+job.batch/gymtracker-loadtest   Complete   4/4           2m35s      6m21s   load         curlimages/curl:8.23.0   batch.kubernetes.io/controller-uid=0765d473-844b-47a0-8bb0-2aeca44b9877
+
+NAME                                             POD-SELECTOR                            AGE
+networkpolicy.networking.k8s.io/gymtracker-api   app.kubernetes.io/name=gymtracker-api   6m42s
+
+NAME                             REQUEST                                                        LIMIT                                           AGE
+resourcequota/gymtracker-quota   pods: 2/20, requests.cpu: 200m/2, requests.memory: 304Mi/2Gi   limits.cpu: 1500m/6, limits.memory: 640Mi/4Gi   6m43s
+Name:            gymtracker-quota
+Namespace:       gymtracker
+Resource         Used   Hard
+--------         ----   ----
+limits.cpu       1500m  6
+limits.memory    640Mi  4Gi
+pods             2      20
+requests.cpu     200m   2
+requests.memory  304Mi  2Gi
+NAME                           READY   STATUS    RESTARTS   AGE
+pod/traefik-7b597bdfc6-lmm49   1/1     Running   0          7m38s
+
+NAME              TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
+service/traefik   LoadBalancer   10.101.246.177   <pending>     80:30793/TCP,443:30677/TCP   7m38s
+NAME                                                       READY   STATUS    RESTARTS   AGE
+pod/monitoring-grafana-54bdc8dd5d-nkwbg                    3/3     Running   0          7m29s
+pod/monitoring-kube-prometheus-operator-58c64d6b88-kg7t5   1/1     Running   0          7m29s
+pod/monitoring-kube-state-metrics-78fd56fc4b-wj7tw         1/1     Running   0          7m29s
+pod/monitoring-prometheus-node-exporter-npg55              1/1     Running   0          7m29s
+pod/prometheus-monitoring-kube-prometheus-prometheus-0     2/2     Running   0          7m22s
+
+NAME                                            TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)             AGE
+service/monitoring-grafana                      ClusterIP   10.108.1.193     <none>        80/TCP              7m29s
+service/monitoring-kube-prometheus-operator     ClusterIP   10.103.48.118    <none>        443/TCP             7m29s
+service/monitoring-kube-prometheus-prometheus   ClusterIP   10.103.19.236    <none>        9090/TCP,8080/TCP   7m29s
+service/monitoring-kube-state-metrics           ClusterIP   10.103.203.246   <none>        8080/TCP            7m29s
+service/monitoring-prometheus-node-exporter     ClusterIP   10.109.25.230    <none>        9100/TCP            7m29s
+service/prometheus-operated                     ClusterIP   None             <none>        9090/TCP            7m22s
+NAME                              CPU(cores)   MEMORY(bytes)   
+dynamodb-local-5d969fc86c-2qb4n   2m           130Mi           
+gymtracker-api-85bcc6f967-6bbc2   1m           8Mi             

@@ -1,0 +1,7 @@
+Informational (High)	A Client Error response code was returned by the server	74 casos
+Informational (Low)	Authentication Request Identified	2 casos
+Informational (Medium)	Non-Storable Content	5 casos
+Low (High)	A Server Error response code was returned by the server	3 casos
+Low (Medium)	Application Error Disclosure	3 casos
+Medium (Medium)	Cross-Domain Misconfiguration	5 casos
+Hallazgos de riesgo alto: 0

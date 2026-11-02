@@ -1,0 +1,38 @@
+── Antes de la carga
+23:12:48  cpu=?%/70%  actuales=1  deseadas=0
+job.batch/gymtracker-loadtest created
+── Durante la carga
+23:13:03  cpu=?%/70%  actuales=1  deseadas=0
+23:13:18  cpu=?%/70%  actuales=1  deseadas=0
+23:13:34  cpu=466%/70%  actuales=1  deseadas=5
+23:13:49  cpu=500%/70%  actuales=5  deseadas=5
+23:14:04  cpu=317%/70%  actuales=5  deseadas=5
+23:14:19  cpu=264%/70%  actuales=5  deseadas=5
+23:14:35  cpu=252%/70%  actuales=5  deseadas=5
+23:14:50  cpu=287%/70%  actuales=5  deseadas=5
+23:15:05  cpu=271%/70%  actuales=5  deseadas=5
+23:15:21  cpu=178%/70%  actuales=5  deseadas=5
+23:15:36  cpu=288%/70%  actuales=5  deseadas=5
+23:15:51  cpu=143%/70%  actuales=5  deseadas=5
+23:16:06  cpu=39%/70%  actuales=5  deseadas=5
+23:16:22  cpu=1%/70%  actuales=5  deseadas=5
+23:16:37  cpu=1%/70%  actuales=5  deseadas=5
+23:16:52  cpu=1%/70%  actuales=5  deseadas=5
+job.batch/gymtracker-loadtest condition met
+── Después de la carga
+23:17:07  cpu=1%/70%  actuales=5  deseadas=5
+23:17:23  cpu=1%/70%  actuales=5  deseadas=5
+23:17:38  cpu=1%/70%  actuales=5  deseadas=5
+23:17:53  cpu=1%/70%  actuales=5  deseadas=3
+23:18:08  cpu=1%/70%  actuales=3  deseadas=1
+Events:
+  Type     Reason                        Age                    From                       Message
+  ----     ------                        ----                   ----                       -------
+  Warning  FailedGetResourceMetric       5m12s (x3 over 5m42s)  horizontal-pod-autoscaler  failed to get cpu utilization: unable to get metrics for resource cpu: no metrics returned from resource metrics API
+  Warning  FailedComputeMetricsReplicas  5m12s (x3 over 5m42s)  horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get cpu resource metric value: failed to get cpu utilization: unable to get metrics for resource cpu: no metrics returned from resource metrics API
+  Warning  FailedGetResourceMetric       4m57s                  horizontal-pod-autoscaler  failed to get cpu utilization: did not receive metrics for targeted pods (pods might be unready)
+  Warning  FailedComputeMetricsReplicas  4m57s                  horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get cpu resource metric value: failed to get cpu utilization: did not receive metrics for targeted pods (pods might be unready)
+  Normal   SuccessfulRescale             4m42s                  horizontal-pod-autoscaler  New size: 5; reason: cpu resource utilization (percentage of request) above target
+  Normal   SuccessfulRescale             27s                    horizontal-pod-autoscaler  New size: 3; reason: All metrics below target
+  Normal   SuccessfulRescale             12s                    horizontal-pod-autoscaler  New size: 1; reason: All metrics below target
+Máximo de réplicas listas: 5

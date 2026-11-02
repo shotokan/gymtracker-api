@@ -1,0 +1,1 @@
+imagen=ghcr.io/shotokan/gymtracker-api@sha256:625b9d0affdefe88f19e2fe559fba3ac878403d6f2e311132fc8c4334246e4c3

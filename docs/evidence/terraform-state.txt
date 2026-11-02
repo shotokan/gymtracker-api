@@ -1,0 +1,6 @@
+random_password.grafana_admin
+module.platform.helm_release.metrics_server
+module.platform.helm_release.monitoring
+module.platform.helm_release.traefik
+module.platform.kubernetes_namespace_v1.ingress
+module.platform.kubernetes_namespace_v1.monitoring

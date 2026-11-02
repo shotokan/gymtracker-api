@@ -1,6 +1,169 @@
 # GymTracker API
 
-A serverless REST API for tracking gym workouts, built with Go and AWS CDK.
+A REST API for tracking gym workouts, built with Go. It deploys as serverless functions with AWS CDK, or as a container on Kubernetes.
+
+## 🚢 Pipeline DevOps (contenedores y Kubernetes)
+
+Además del despliegue serverless, la API corre como un solo proceso HTTP en un contenedor, con un pipeline completo en GitHub Actions: pruebas, análisis de seguridad, imagen, Terraform, despliegue en Kubernetes, DAST y evidencias.
+
+Los dos despliegues comparten la lógica de negocio y no se afectan entre sí:
+
+| | Serverless (producción) | Kubernetes (pruebas) |
+|---|---|---|
+| **Cómputo** | AWS Lambda | Pods en minikube |
+| **Entrada** | [`cmd/{auth,user,plan,session,authorizer}`](cmd/) | [`cmd/server`](cmd/server/main.go) |
+| **Infraestructura** | AWS CDK ([`infra/`](infra/)) | Terraform ([`terraform/`](terraform/)) y Kustomize ([`deploy/k8s/`](deploy/k8s/)) |
+| **Base de datos** | DynamoDB `gym-tracker` | DynamoDB Local, en memoria |
+| **Workflow** | [`deploy.yml`](.github/workflows/deploy.yml) | [`pipeline.yml`](.github/workflows/pipeline.yml) |
+| **Costo** | Según uso en AWS | Ninguno |
+
+### Qué hay en el repositorio
+
+| Ruta | Contenido |
+|---|---|
+| [`Dockerfile`](Dockerfile), [`compose.yaml`](compose.yaml) | Imagen multi-stage distroless sin root y pila local |
+| [`internal/httpapi/`](internal/httpapi/) | Adaptador HTTP sobre los routers de Lambda, con métricas y health checks |
+| [`terraform/environments/local`](terraform/environments/local/main.tf) | metrics-server, Traefik, Prometheus y Grafana sobre un clúster existente. **Se aplica en cada ejecución** |
+| [`terraform/environments/aws`](terraform/environments/aws/main.tf) | VPC, EKS, ECR y DynamoDB. **Nunca se ha aplicado**: solo se valida y se prueba con proveedores simulados |
+| [`deploy/k8s/base`](deploy/k8s/base/) | Deployment, Service, Ingress, HPA, PDB, NetworkPolicy, cuota, ServiceMonitor y alertas |
+| [`deploy/k8s/components/finops`](deploy/k8s/components/finops/schedule.yaml) | Apagado y encendido por horario |
+| [`deploy/k8s/monitoring`](deploy/k8s/monitoring/) | Dashboard de Grafana |
+| [`docs/openapi.yaml`](docs/openapi.yaml) | Especificación de la API, usada por el DAST |
+| [`scripts/`](scripts/) | Despliegue, prueba de humo, demos de HPA y FinOps, y recolección de evidencias |
+| [`docs/evidence/`](docs/evidence/) | Logs, capturas y reportes de una ejecución real |
+
+### Ejecutar en local con Docker Compose
+
+La forma más rápida. Necesita Docker, y para la prueba de humo `curl`, `jq` y AWS CLI.
+
+```bash
+cp .env.example .env
+sed -i.bak "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -hex 48)|" .env && rm .env.bak
+docker compose up --build -d
+
+# 28 comprobaciones del flujo completo: alta, aprobación, permisos, planes y sesiones
+API_URL=http://127.0.0.1:8080 API_HOST=localhost scripts/smoke-test.sh
+
+docker compose down -v
+```
+
+La API queda en `http://127.0.0.1:8080`, y las métricas en `http://127.0.0.1:9090/metrics`. Los datos se borran al apagar la pila.
+
+### Ejecutar en el entorno de pruebas (minikube)
+
+Necesita Docker, `minikube`, `kubectl`, `terraform`, `jq`, AWS CLI, unos 6 GB de memoria y 15 GB de disco libres.
+
+```bash
+scripts/local-up.sh         # crea el clúster, aplica Terraform y despliega
+
+# En otra terminal; déjala abierta
+scripts/port-forwards.sh
+
+scripts/smoke-test.sh       # 28 comprobaciones a través del Ingress
+scripts/hpa-demo.sh         # carga real; termina con error si el HPA no escala
+scripts/finops-demo.sh      # ejecuta el apagado y el encendido por horario
+
+scripts/local-down.sh           # detiene el clúster y conserva sus datos
+scripts/local-down.sh --delete  # borra el clúster y el estado de Terraform
+```
+
+`local-up.sh` no se ha ejecutado de principio a fin en una máquina de desarrollo. Sus pasos sí se ejecutan en el pipeline, salvo que allí la imagen viene del registro y aquí se construye con `minikube image build`.
+
+### Ejecutar el pipeline
+
+Cada push a `main` o a `feat/devops-pipeline` lo lanza, y también se puede lanzar a mano desde [Actions](https://github.com/shotokan/gymtracker-api/actions/workflows/pipeline.yml). No necesita secretos propios ni credenciales de AWS: el clúster vive dentro del runner y desaparece al terminar.
+
+```mermaid
+flowchart LR
+    T[Build y test] --> I[Imagen en GHCR]
+    S[SAST] --> I
+    C[CodeQL] --> I
+    V[Validar Terraform y manifiestos] --> I
+    I --> D[Compose, Terraform y despliegue en minikube]
+    D --> E[Prueba de humo, HPA, métricas y FinOps]
+    E --> Z[DAST con ZAP]
+    Z --> P[Evidencias en la rama pipeline-evidence]
+```
+
+| Trabajo | Qué hace | Falla si |
+|---|---|---|
+| Build and test | `golangci-lint` (incluye gosec), `go test -race` y compilación | Hay errores de lint o de tests |
+| SAST | govulncheck, gitleaks, hadolint y Trivy sobre código y manifiestos renderizados | Hay un hallazgo alcanzable, un secreto o severidad alta o crítica |
+| SAST (CodeQL) | Análisis estático `security-extended` | CodeQL no puede completar el análisis |
+| Validate | `terraform fmt`, `validate`, `test` y kubeconform | El código o los esquemas no son válidos |
+| Image | Escanea y publica para amd64 y arm64, con SBOM y procedencia | Trivy encuentra severidad alta o crítica |
+| Deploy | Compose, Terraform y despliegue en un clúster real, con prueba de humo, HPA, FinOps y DAST | Falla una comprobación, el HPA no escala o ZAP reporta riesgo alto |
+
+### Cómo validar el despliegue y el monitoreo
+
+Con `scripts/port-forwards.sh` abierto:
+
+```bash
+kubectl -n gymtracker get deploy,pods,svc,ingress,hpa,cronjob
+kubectl -n gymtracker get hpa gymtracker-api --watch
+
+# Debe responder 401: la petición llegó a la API por el Ingress, sin token
+curl -i -H 'Host: gymtracker.local' http://127.0.0.1:8081/plans
+
+# Debe responder 404: las métricas no se publican por el Ingress
+curl -i -H 'Host: gymtracker.local' http://127.0.0.1:8081/metrics
+
+# Objetivo de Prometheus; debe decir "up"
+curl -s 'http://127.0.0.1:9091/api/v1/targets?state=active' \
+  | jq '.data.activeTargets[] | select(.labels.namespace == "gymtracker") | {pod: .labels.pod, health}'
+
+# Guarda logs y capturas de pantalla; define CHROME_BIN si Chrome no está en el PATH
+scripts/collect-evidence.sh evidencias/
+```
+
+El dashboard **GymTracker API** está en [http://127.0.0.1:3000/d/gymtracker](http://127.0.0.1:3000/d/gymtracker). Se puede ver sin iniciar sesión, porque Grafana solo es accesible con acceso al clúster. Para administrarlo, el usuario es `admin` y la contraseña se obtiene con `terraform -chdir=terraform/environments/local output -raw grafana_admin_password`. Prometheus está en [http://127.0.0.1:9091](http://127.0.0.1:9091).
+
+### FinOps
+
+| Medida | Entorno | Estado |
+|---|---|---|
+| HPA de 1 a 5 réplicas, con solicitudes de recursos ajustadas | Kubernetes | Probado |
+| Apagado a las 20:00 y encendido a las 07:00, de lunes a viernes, hora de México | Kubernetes | Probado |
+| Cuota y límites por namespace | Kubernetes | Aplicado |
+| Sin Alertmanager y con retención corta de métricas | minikube | Aplicado |
+| Clúster efímero y cancelación de ejecuciones reemplazadas | Pipeline | Aplicado |
+| Nodos Spot, apagado nocturno, sin NAT, DynamoDB bajo demanda, limpieza de ECR, alerta de presupuesto y etiquetas de costo | AWS | Definido, nunca aplicado |
+
+### Evidencias
+
+De la [ejecución 41542810593](https://github.com/shotokan/gymtracker-api/actions/runs/41542810593), sobre el commit `55512f1`. Cada ejecución las renueva en la rama [`pipeline-evidence`](https://github.com/shotokan/gymtracker-api/tree/pipeline-evidence).
+
+| Resultado | Evidencia |
+|---|---|
+| Terraform creó los namespaces y los charts | [`terraform-apply.log`](docs/evidence/terraform-apply.log), [`terraform-state.txt`](docs/evidence/terraform-state.txt) |
+| Despliegue correcto de la imagen publicada | [`deploy.log`](docs/evidence/deploy.log), [`cluster-state.txt`](docs/evidence/cluster-state.txt), [`image.txt`](docs/evidence/image.txt) |
+| 28 de 28 comprobaciones por el Ingress y en Compose | [`smoke-test.log`](docs/evidence/smoke-test.log), [`compose-smoke-test.log`](docs/evidence/compose-smoke-test.log) |
+| Las mismas 28 comprobaciones después del escaneo | [`smoke-test-after-dast.log`](docs/evidence/smoke-test-after-dast.log) |
+| Métricas y health checks fuera del Ingress: 404 | [`admin-port-isolation.log`](docs/evidence/admin-port-isolation.log) |
+| HPA de 1 a 5 réplicas con carga real, y de vuelta a 1 | [`hpa-demo.log`](docs/evidence/hpa-demo.log) |
+| Apagado a 0 réplicas y encendido a 1 | [`finops-demo.log`](docs/evidence/finops-demo.log) |
+| Prometheus recibe métricas y tiene las alertas | [`prometheus-queries.txt`](docs/evidence/prometheus-queries.txt) |
+| DAST: 118 reglas sin hallazgos, 3 avisos y ninguno de riesgo alto | [`zap-summary.txt`](docs/evidence/zap-summary.txt), [`zap-report.html`](docs/evidence/zap-report.html) |
+
+**Dashboard de Grafana durante y después de la carga:**
+
+![Dashboard de Grafana](docs/evidence/grafana-dashboard.png)
+
+**Réplicas en Prometheus:**
+
+![Réplicas en Prometheus](docs/evidence/prometheus-replicas.png)
+
+**Objetivo de Prometheus activo:**
+
+![Objetivo de Prometheus](docs/evidence/prometheus-targets.png)
+
+### Limitaciones conocidas
+
+- **Terraform de AWS:** nunca se ha aplicado. Crear EKS cuesta dinero, y solo se validó con proveedores simulados, así que pueden aparecer errores que únicamente AWS detecta.
+- **NetworkPolicy:** el manifiesto se aplica, pero la red `kindnet` de minikube no la hace cumplir. No está demostrado que bloquee tráfico.
+- **DAST:** ZAP avisa de `Access-Control-Allow-Origin: *`, que viene de los handlers de Lambda, y de tres respuestas `500`: en `POST /sessions`, y en `PATCH` y `DELETE` de una rutina cuyo plan no existe. Son errores de validación y de mapeo de códigos en los handlers, y el cuerpo solo dice `internal error`.
+- **Ingress sin TLS:** el clúster de pruebas usa HTTP. Exponerlo a internet requeriría TLS y límites de peticiones.
+- **Traefik:** Terraform no espera su chart, porque Helm agotaba el tiempo con el pod ya listo. No se identificó la causa; `scripts/deploy.sh` espera el rollout.
 
 ## 🏗️ Architecture
 
@@ -318,7 +481,7 @@ External World
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Go 1.21+
+- Go 1.26+
 - AWS CLI configured
 - Node.js 18+ (for CDK)
 - AWS account with appropriate permissions
@@ -498,7 +661,7 @@ func TestLogin_Success(t *testing.T) {
 
 ## 🏷️ Tech Stack
 
-- **Language**: Go 1.21+
+- **Language**: Go 1.26+
 - **Infrastructure**: AWS CDK (TypeScript)
 - **Compute**: AWS Lambda (ARM64)
 - **Database**: DynamoDB (Single Table Design)
