@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><title>Reporte del pipeline DevOps de GymTracker API</title><style>body{font-family:Arial,sans-serif;font-size:11pt;line-height:1.45;max-width:800px;margin:24px auto;padding:0 16px}pre{font-family:'Courier New',monospace;font-size:9pt;background:#f2f4f5;padding:8px;overflow-x:auto}code{font-family:'Courier New',monospace;font-size:10pt}table{border-collapse:collapse;width:100%}th,td{border:1px solid #b8c0c5;padding:5px;vertical-align:top;font-size:10pt}th{background:#e6eaec;text-align:left}img{max-width:100%}</style></head><body>
+<h1>Reporte del pipeline DevOps de GymTracker API</h1>
+<p>Repositorio: <a href="https://github.com/shotokan/gymtracker-api/tree/feat/devops-pipeline">shotokan/gymtracker-api, rama feat/devops-pipeline</a>. Ejecución de referencia: <a href="https://github.com/shotokan/gymtracker-api/actions/runs/41542810593">41542810593</a>, del 2 de noviembre de 2026, sobre el commit 55512f1.</p>
+
+<h2>Resumen ejecutivo</h2>
+<p>El pipeline funciona de principio a fin en GitHub Actions y no tiene costo. En cada ejecución compila y prueba la API, corre los análisis de seguridad, publica la imagen, provisiona la plataforma con Terraform, despliega en un clúster de Kubernetes, comprueba el escalado y el monitoreo, y ejecuta un DAST contra la aplicación desplegada.</p>
+<p>La infraestructura de AWS con EKS está escrita, pero nunca se ha aplicado. Para evitar costos, el entorno de pruebas es un clúster minikube que se crea dentro del runner y desaparece al terminar. Por eso este reporte demuestra el despliegue en ese clúster, y no en la nube. La sección Limitaciones detalla esta y las demás restricciones.</p>
+<table>
+<tr><th>Resultado de la ejecución</th><th>Valor</th></tr>
+<tr><td>Trabajos del pipeline</td><td>6 de 6 correctos</td></tr>
+<tr><td>Prueba de humo por el Ingress y en Docker Compose</td><td>28 de 28 comprobaciones en cada una, y otra vez 28 de 28 después del DAST</td></tr>
+<tr><td>Terraform</td><td>6 recursos creados, 0 cambiados, 0 destruidos</td></tr>
+<tr><td>Autoescalado</td><td>De 1 a 5 réplicas con carga real, y de vuelta a 1 al terminar</td></tr>
+<tr><td>DAST con OWASP ZAP</td><td>118 reglas sin hallazgos, 3 avisos y 0 hallazgos de riesgo alto</td></tr>
+<tr><td>Imagen publicada</td><td>9.5 MB comprimida para amd64; también se publica para arm64</td></tr>
+</table>
+
+<h2>Punto de partida y arquitectura</h2>
+<p>GymTracker API es una API de entrenamientos en Go con arquitectura hexagonal. Se desplegaba solo como funciones Lambda con AWS CDK, y sus handlers dependen de eventos de API Gateway. La tarea requiere contenedores y Kubernetes, así que se añadió un adaptador sin cambiar la lógica de negocio.</p>
+<ul>
+<li><code>internal/httpapi</code> traduce peticiones HTTP a los eventos que esperan los routers existentes, y valida el JWT como lo hacía el authorizer de API Gateway.</li>
+<li><code>cmd/server</code> ejecuta toda la API en un solo proceso. El puerto 8080 sirve la API, y el 9090 sirve las métricas y los health checks.</li>
+<li>El Ingress solo enruta al puerto 8080, así que las métricas no quedan expuestas. El pipeline lo comprueba: <code>/metrics</code>, <code>/healthz</code> y <code>/readyz</code> responden 404 por el Ingress.</li>
+</ul>
+<p>El despliegue con Lambda y CDK sigue igual y no comparte infraestructura con el entorno de Kubernetes. El módulo de DynamoDB en Terraform rechaza el nombre de tabla de CDK para evitar colisiones.</p>
+
+<h2>Docker</h2>
+<p>El <a href="https://github.com/shotokan/gymtracker-api/blob/feat/devops-pipeline/Dockerfile">Dockerfile</a> tiene dos etapas. Las dependencias se descargan en una capa aparte, de modo que quedan en caché hasta que cambie <code>go.mod</code>. La imagen final es distroless, sin shell ni gestor de paquetes, y corre con un UID sin privilegios.</p>
+<pre># hadolint ignore=DL3029
+FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+COPY pkg ./pkg
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/server ./cmd/dbinit
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/ /app/
+USER 65532:65532
+EXPOSE 8080 9090
+ENTRYPOINT ["/app/server"]</pre>
+<p>El archivo <code>.dockerignore</code> es una lista de permitidos: solo entran <code>cmd</code>, <code>internal</code>, <code>pkg</code> y los archivos de módulos, sin tests. El archivo <code>compose.yaml</code> levanta la API con DynamoDB Local, y toma el secreto JWT de un <code>.env</code> que git ignora.</p>
+
+<h2>Terraform</h2>
+<table>
+<tr><th>Entorno</th><th>Contenido</th><th>Estado</th></tr>
+<tr><td><code>terraform/environments/local</code></td><td>Módulo <code>platform</code>: namespaces, metrics-server, Traefik y kube-prometheus-stack con versiones fijadas</td><td>Se aplica en cada ejecución</td></tr>
+<tr><td><code>terraform/environments/aws</code></td><td>Módulos <code>network</code>, <code>eks</code>, <code>ecr</code> y <code>dynamodb</code>, rol de IAM para los pods y alerta de presupuesto</td><td>Nunca aplicado. Se valida y se prueba con proveedores simulados</td></tr>
+</table>
+<p>El clúster minikube no lo crea Terraform: lo crean la acción del pipeline o <code>scripts/local-up.sh</code>. Terraform provisiona la plataforma sobre él. Los módulos usan variables con validaciones, por ejemplo:</p>
+<pre>variable "public_access_cidrs" {
+  description = "CIDR blocks allowed to reach the Kubernetes API. There is no default on purpose."
+  type        = list(string)
+
+  validation {
+    condition     = length(var.public_access_cidrs) > 0 &amp;&amp; !contains(var.public_access_cidrs, "0.0.0.0/0")
+    error_message = "List specific CIDR blocks. The Kubernetes API must not be open to the whole internet."
+  }
+}</pre>
+<p>Los tests de <code>terraform test</code> no necesitan credenciales, y comprueban que el plan de AWS se resuelve, que se rechaza una API de Kubernetes abierta y que se rechaza la tabla de CDK. La contraseña de Grafana se genera con <code>random_password</code>, y el estado de Terraform está excluido de git.</p>
+
+<h2>Pipeline CI/CD</h2>
+<p>La definición está en <a href="https://github.com/shotokan/gymtracker-api/blob/feat/devops-pipeline/.github/workflows/pipeline.yml">.github/workflows/pipeline.yml</a>. No requiere secretos propios: usa <code>GITHUB_TOKEN</code>. Las acciones de terceros están fijadas por el SHA completo del commit, porque una etiqueta se puede mover.</p>
+<table>
+<tr><th>Trabajo</th><th>Qué hace</th><th>Duración</th></tr>
+<tr><td>Build and test</td><td>golangci-lint con gosec, tests con detector de condiciones de carrera, cobertura y compilación</td><td>1.2 min</td></tr>
+<tr><td>SAST</td><td>govulncheck, gitleaks sobre todo el historial, hadolint, y Trivy sobre dependencias, código de infraestructura y manifiestos renderizados</td><td>1.0 min</td></tr>
+<tr><td>SAST (CodeQL)</td><td>Análisis del código Go con el conjunto security-extended</td><td>0.9 min</td></tr>
+<tr><td>Validate Terraform and manifests</td><td>terraform fmt, validate y test, y kubeconform sobre los manifiestos</td><td>0.6 min</td></tr>
+<tr><td>Build and push image</td><td>Escanea la imagen con Trivy y la publica en GHCR para amd64 y arm64, con SBOM y procedencia</td><td>1.2 min</td></tr>
+<tr><td>Provision, deploy and DAST</td><td>Prueba Compose, crea el clúster, aplica Terraform, despliega, ejecuta prueba de humo, HPA, recolección de métricas y FinOps, y corre ZAP</td><td>12.2 min</td></tr>
+</table>
+<p>Los cuatro primeros trabajos corren en paralelo, y la imagen solo se publica si todos pasan. El despliegue usa la imagen ya publicada, no una construida aparte. Cada ejecución publica sus logs y capturas en la rama <a href="https://github.com/shotokan/gymtracker-api/tree/pipeline-evidence">pipeline-evidence</a>.</p>
+
+<h3>Problemas encontrados al ponerlo en marcha</h3>
+<p>Estas ejecuciones fallidas quedaron en el historial, y cada corrección tiene su commit.</p>
+<table>
+<tr><th>Commit</th><th>Problema</th><th>Corrección</th></tr>
+<tr><td>eb7d923</td><td>govulncheck detectó una vulnerabilidad alcanzable de la biblioteca estándar en Go 1.26.9</td><td>Actualizar a Go 1.26.10</td></tr>
+<tr><td>666cf6b</td><td>hadolint rechazó el usuario por nombre en el Dockerfile</td><td>Usar el UID numérico 65532</td></tr>
+<tr><td>eea370a</td><td>Trivy encontró CVE en <code>x/crypto</code> y <code>x/mod</code>, credenciales ficticias en un ConfigMap y una raíz escribible en DynamoDB Local</td><td>Actualizar dependencias, usar un Secret y raíz de solo lectura, y escanear los manifiestos renderizados</td></tr>
+<tr><td>cee05d8</td><td>Trivy encontró CVE en dependencias de <code>aws-cdk-lib</code></td><td>Actualizar la biblioteca. La plantilla de CDK conserva los mismos recursos</td></tr>
+<tr><td>4841eb6</td><td>Los recursos del overlay quedaban en el namespace <code>default</code>; <code>script | tee</code> ocultaba fallos, incluido un <code>terraform apply</code> fallido; Grafana se reiniciaba</td><td>Declarar el namespace, activar <code>pipefail</code> con <code>shell: bash</code> y subir el límite de memoria de Grafana a 512 MiB</td></tr>
+<tr><td>d94af9c</td><td>Helm agotaba el tiempo esperando el chart de Traefik con su pod ya listo. No se identificó la causa</td><td>Quitar esa espera y comprobar el rollout en <code>scripts/deploy.sh</code></td></tr>
+<tr><td>55512f1</td><td>La muestra del HPA leía mal sus columnas, y las métricas se recogían después de que FinOps reemplazara los pods</td><td>Leer por jsonpath, cambiar el orden y añadir la prueba de Compose</td></tr>
+</table>
+
+<h2>Kubernetes</h2>
+<p>Los manifiestos usan Kustomize: una base y overlays para minikube y para EKS. El overlay de EKS se valida con kubeconform, pero no se ha desplegado.</p>
+<table>
+<tr><th>Recurso</th><th>Configuración</th></tr>
+<tr><td>Deployment</td><td>Probes de inicio, vida y disponibilidad; solicitudes de 100m de CPU y 48 MiB de memoria; sin root; raíz de solo lectura; sin capabilities</td></tr>
+<tr><td>Service</td><td>ClusterIP, con puerto público y puerto de administración</td></tr>
+<tr><td>Ingress</td><td>Clase traefik, host <code>gymtracker.local</code>, solo hacia el puerto público</td></tr>
+<tr><td>HorizontalPodAutoscaler</td><td>De 1 a 5 réplicas con objetivo de 70% de CPU</td></tr>
+<tr><td>Namespace</td><td>Perfil de seguridad <code>restricted</code> obligatorio</td></tr>
+<tr><td>Otros</td><td>PodDisruptionBudget, NetworkPolicy, ResourceQuota, LimitRange, ServiceMonitor y PrometheusRule</td></tr>
+</table>
+<pre>apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gymtracker-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gymtracker-api
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+    scaleDown:
+      stabilizationWindowSeconds: 120</pre>
+<p>Para probarlo, un Job hace inicios de sesión reales desde dentro del clúster, porque cada uno ejecuta bcrypt. La CPU llegó a 500% del valor solicitado y el HPA pasó de 1 a 5 réplicas en unos 15 segundos. Al terminar la carga, y tras la ventana de 120 segundos, bajó a 3 y luego a 1.</p>
+<pre>23:13:18  cpu=?%/70%  actuales=1  deseadas=0
+23:13:34  cpu=466%/70%  actuales=1  deseadas=5
+23:13:49  cpu=500%/70%  actuales=5  deseadas=5
+...
+23:17:38  cpu=1%/70%  actuales=5  deseadas=5
+23:17:53  cpu=1%/70%  actuales=5  deseadas=3
+23:18:08  cpu=1%/70%  actuales=3  deseadas=1</pre>
+
+<h2>Monitoreo con Prometheus y Grafana</h2>
+<p>Terraform instala kube-prometheus-stack. La API publica <code>gymtracker_http_requests_total</code>, <code>gymtracker_http_request_duration_seconds</code> y <code>gymtracker_http_requests_in_flight</code>, etiquetadas por la ruta y no por la URL, para que los identificadores no se conviertan en etiquetas. Un ServiceMonitor las recoge cada 15 segundos.</p>
+<p>El dashboard <code>GymTracker API</code> se carga desde un ConfigMap y muestra peticiones por segundo, errores 5xx, réplicas, peticiones por ruta y por código, latencia p50 y p95, réplicas frente al HPA, y CPU y memoria por pod. Hay tres alertas: tasa de errores 5xx superior a 5%, p95 superior a 1 segundo y HPA en el máximo durante 15 minutos.</p>
+<p>En esta ejecución Prometheus registró 577 inicios de sesión correctos, y el objetivo de la API estaba activo. El p95 de los últimos 15 minutos fue de 2.25 segundos por la carga de bcrypt, de modo que la alerta de latencia quedó en estado <code>pending</code>, como se espera durante esa prueba.</p>
+<p><img src="https://raw.githubusercontent.com/shotokan/gymtracker-api/00c0565060133449ced60de1c961c94d9eee2c7a/docs/evidence/grafana-dashboard.png" width="620" alt="Dashboard de Grafana con el escalado de 1 a 5 réplicas"></p>
+<p><img src="https://raw.githubusercontent.com/shotokan/gymtracker-api/00c0565060133449ced60de1c961c94d9eee2c7a/docs/evidence/prometheus-replicas.png" width="620" alt="Réplicas en Prometheus durante la prueba de carga"></p>
+<p><img src="https://raw.githubusercontent.com/shotokan/gymtracker-api/00c0565060133449ced60de1c961c94d9eee2c7a/docs/evidence/prometheus-targets.png" width="620" alt="Objetivo de la API activo en Prometheus"></p>
+
+<h2>FinOps</h2>
+<table>
+<tr><th>Medida</th><th>Estado</th></tr>
+<tr><td>HPA con mínimo de 1 réplica y solicitudes de recursos ajustadas</td><td>Probado</td></tr>
+<tr><td>CronJobs que apagan la API a las 20:00 y la encienden a las 07:00, de lunes a viernes, hora de México</td><td>Probado: se ejecutaron a mano y pasó de 1 a 0 réplicas y de vuelta a 1</td></tr>
+<tr><td>Cuota y límites por namespace</td><td>Aplicado</td></tr>
+<tr><td>Clúster efímero, cancelación de ejecuciones reemplazadas y retención de artefactos de 14 días</td><td>Aplicado</td></tr>
+<tr><td>Nodos Spot, apagado nocturno de nodos, sin NAT, DynamoDB bajo demanda, limpieza de ECR, etiquetas de costo y alerta de presupuesto</td><td>Definido en Terraform de AWS, nunca aplicado</td></tr>
+</table>
+
+<h2>Seguridad</h2>
+<ul>
+<li><b>SAST:</b> gosec, govulncheck, gitleaks, hadolint y Trivy pasan en la ejecución de referencia, y cualquiera de ellos detiene el pipeline si encuentra un problema. CodeQL completó su análisis, pero sus alertas se publican en la pestaña Security del repositorio y no detienen el pipeline. Esas alertas no se revisaron para este reporte, porque consultarlas requiere iniciar sesión.</li>
+<li><b>Excepciones aceptadas:</b> dos, ambas en Terraform de AWS y con su motivo junto al recurso: el endpoint público de EKS, restringido a una lista de IP, y las subredes públicas, para evitar el costo de NAT. También se ignoran cuatro coincidencias de gitleaks, que son cabeceras JWT de ejemplo en documentación.</li>
+<li><b>Secretos:</b> el secreto JWT se genera al desplegar y no está en el repositorio. Las credenciales de DynamoDB Local son valores ficticios que el servicio no comprueba. El token del DAST se oculta en los reportes publicados.</li>
+<li><b>DAST:</b> ZAP escaneó la API con autenticación, usando <code>docs/openapi.yaml</code>. El pipeline falla si hay hallazgos de riesgo alto.</li>
+</ul>
+<table>
+<tr><th>Riesgo</th><th>Hallazgo de ZAP</th><th>Detalle</th></tr>
+<tr><td>Medio</td><td>Cross-Domain Misconfiguration</td><td><code>Access-Control-Allow-Origin: *</code> en las rutas de usuarios</td></tr>
+<tr><td>Bajo</td><td>Server Error y Application Error Disclosure</td><td>3 respuestas 500: <code>POST /sessions</code>, y <code>PATCH</code> y <code>DELETE</code> de una rutina cuyo plan no existe. El cuerpo solo dice <code>internal error</code></td></tr>
+</table>
+<p>Estos hallazgos siguen abiertos. El de CORS requiere decidir qué dominios se permiten en producción, y los 500 deberían ser respuestas 400 o 404.</p>
+
+<h2>Cómo replicar y validar</h2>
+<p>El <a href="https://github.com/shotokan/gymtracker-api/blob/feat/devops-pipeline/README.md">README</a> tiene las instrucciones completas. La forma más directa no requiere instalar nada: hacer un fork, activar GitHub Actions, cambiar la variable <code>IMAGE</code> del workflow al registro propio y lanzar el workflow Pipeline a mano.</p>
+<p>En local, con Docker, <code>curl</code>, <code>jq</code> y AWS CLI:</p>
+<pre>cp .env.example .env
+sed -i.bak "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -hex 48)|" .env &amp;&amp; rm .env.bak
+docker compose up --build -d
+API_URL=http://127.0.0.1:8080 API_HOST=localhost scripts/smoke-test.sh
+docker compose down -v</pre>
+<p>En el entorno de pruebas, además con minikube, kubectl y Terraform:</p>
+<pre>scripts/local-up.sh
+scripts/port-forwards.sh      # en otra terminal
+scripts/smoke-test.sh
+scripts/hpa-demo.sh
+scripts/finops-demo.sh
+scripts/local-down.sh --delete</pre>
+
+<h2>Evidencias</h2>
+<p>Los logs y reportes de la ejecución de referencia están en <a href="https://github.com/shotokan/gymtracker-api/tree/feat/devops-pipeline/docs/evidence">docs/evidence</a>.</p>
+<table>
+<tr><th>Archivo</th><th>Demuestra</th></tr>
+<tr><td>terraform-apply.log, terraform-state.txt</td><td>Provisionamiento con Terraform</td></tr>
+<tr><td>deploy.log, cluster-state.txt, image.txt</td><td>Despliegue de la imagen publicada</td></tr>
+<tr><td>smoke-test.log, compose-smoke-test.log, smoke-test-after-dast.log</td><td>Funcionamiento de la API</td></tr>
+<tr><td>admin-port-isolation.log</td><td>Métricas y health checks fuera del Ingress</td></tr>
+<tr><td>hpa-demo.log</td><td>Autoescalado</td></tr>
+<tr><td>finops-demo.log</td><td>Apagado y encendido por horario</td></tr>
+<tr><td>prometheus-queries.txt y las capturas PNG</td><td>Métricas y dashboards</td></tr>
+<tr><td>zap-summary.txt, zap-report.html, zap-report.json</td><td>Resultado del DAST</td></tr>
+</table>
+
+<h2>Limitaciones</h2>
+<ul>
+<li><b>Sin despliegue en la nube.</b> Terraform de AWS solo se validó con proveedores simulados, por decisión de no generar costos. Pueden aparecer errores que únicamente AWS detecta. El overlay de EKS contiene valores por sustituir, como el ID de la cuenta.</li>
+<li><b>Entorno de pruebas efímero.</b> Vive dentro del runner durante unos 12 minutos, así que no hay una URL pública que visitar.</li>
+<li><b><code>scripts/local-up.sh</code> sin probar.</b> No se ejecutó de principio a fin en una máquina de desarrollo. Sus pasos corren en el pipeline, salvo <code>minikube image build</code>, porque allí la imagen viene del registro.</li>
+<li><b>NetworkPolicy no demostrada.</b> El manifiesto se aplica, pero la red kindnet de minikube no la hace cumplir.</li>
+<li><b>Sin TLS.</b> El Ingress del entorno de pruebas usa HTTP. Exponerlo a internet requeriría TLS y límites de peticiones.</li>
+<li><b>Datos no persistentes.</b> DynamoDB Local corre en memoria.</li>
+<li><b>Rama sin fusionar.</b> El trabajo está en <code>feat/devops-pipeline</code>. Al fusionar en <code>main</code>, también se ejecutará <code>deploy.yml</code>, que despliega Lambda en AWS.</li>
+</ul>
+
+<h2>Historial de commits</h2>
+<table>
+<tr><th>Commit</th><th>Mensaje</th></tr>
+<tr><td>6e6a10a</td><td>feat(server): run the API as a single HTTP process for containers</td></tr>
+<tr><td>278098f</td><td>feat(docker): add multi-stage Dockerfile and local Compose stack</td></tr>
+<tr><td>3e9aaa9</td><td>feat(k8s): add manifests with Ingress, HPA, FinOps and monitoring</td></tr>
+<tr><td>e65b4dc</td><td>feat(terraform): add local platform and AWS environment</td></tr>
+<tr><td>b123a3c</td><td>ci: add pipeline with SAST, image, Terraform, deploy and DAST</td></tr>
+<tr><td>eb7d923</td><td>fix(ci): build with Go 1.26.10 to pick up a standard library fix</td></tr>
+<tr><td>ebc318e</td><td>ci: allow the cross-compile FROM flag and surface scan findings</td></tr>
+<tr><td>666cf6b</td><td>fix(docker): use a numeric user so Kubernetes can verify it is not root</td></tr>
+<tr><td>eea370a</td><td>fix(security): resolve Trivy findings and scan rendered manifests</td></tr>
+<tr><td>cee05d8</td><td>fix(security): update aws-cdk-lib and accept public test subnets</td></tr>
+<tr><td>4841eb6</td><td>fix(deploy): namespace overlays, surface hidden failures, give Grafana memory</td></tr>
+<tr><td>d94af9c</td><td>fix(terraform): wait for the Traefik rollout outside Helm</td></tr>
+<tr><td>55512f1</td><td>ci: test Compose, fix HPA samples and collect metrics before FinOps</td></tr>
+<tr><td>00c0565</td><td>docs: document the DevOps pipeline and add evidence from a real run</td></tr>
+</table>
+</body></html>

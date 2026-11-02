@@ -89,7 +89,7 @@ flowchart LR
 |---|---|---|
 | Build and test | `golangci-lint` (incluye gosec), `go test -race` y compilación | Hay errores de lint o de tests |
 | SAST | govulncheck, gitleaks, hadolint y Trivy sobre código y manifiestos renderizados | Hay un hallazgo alcanzable, un secreto o severidad alta o crítica |
-| SAST (CodeQL) | Análisis estático `security-extended` | CodeQL no puede completar el análisis |
+| SAST (CodeQL) | Análisis estático `security-extended`; sus alertas quedan en la pestaña Security y no detienen el pipeline | CodeQL no puede completar el análisis |
 | Validate | `terraform fmt`, `validate`, `test` y kubeconform | El código o los esquemas no son válidos |
 | Image | Escanea y publica para amd64 y arm64, con SBOM y procedencia | Trivy encuentra severidad alta o crítica |
 | Deploy | Compose, Terraform y despliegue en un clúster real, con prueba de humo, HPA, FinOps y DAST | Falla una comprobación, el HPA no escala o ZAP reporta riesgo alto |
@@ -156,6 +156,8 @@ De la [ejecución 41542810593](https://github.com/shotokan/gymtracker-api/action
 **Objetivo de Prometheus activo:**
 
 ![Objetivo de Prometheus](docs/evidence/prometheus-targets.png)
+
+El reporte completo está en [`docs/evidence/reporte-pipeline.html`](docs/evidence/reporte-pipeline.html).
 
 ### Limitaciones conocidas
 
