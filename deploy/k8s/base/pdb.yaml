@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gymtracker-api
+spec:
+  # maxUnavailable keeps node drains possible at one replica, which minAvailable would block.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gymtracker-api

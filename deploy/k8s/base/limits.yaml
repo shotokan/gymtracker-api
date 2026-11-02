@@ -1,0 +1,26 @@
+# FinOps: caps what this namespace can consume, whatever a manifest asks for.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: gymtracker-quota
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "6"
+    limits.memory: 4Gi
+    pods: "20"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: gymtracker-defaults
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 50m
+        memory: 32Mi
+      default:
+        cpu: 200m
+        memory: 128Mi

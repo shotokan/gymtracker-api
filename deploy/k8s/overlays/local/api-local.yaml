@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gymtracker-api
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: dbinit
+          image: gymtracker-api:latest
+          command: ["/app/dbinit"]
+          envFrom:
+            - configMapRef:
+                name: gymtracker-local-config
+          env:
+            - name: DYNAMO_TABLE
+              value: gym-tracker
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      containers:
+        - name: api
+          envFrom:
+            - configMapRef:
+                name: gymtracker-config
+            - configMapRef:
+                name: gymtracker-local-config

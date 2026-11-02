@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gymtracker-config
+data:
+  PORT: "8080"
+  ADMIN_PORT: "9090"
+  AWS_REGION: us-east-1
+  DYNAMO_TABLE: gym-tracker

@@ -1,0 +1,12 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gymtracker-api
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gymtracker-api
+  endpoints:
+    - port: admin
+      path: /metrics
+      interval: 15s

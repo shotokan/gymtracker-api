@@ -1,0 +1,25 @@
+# Enforced only by a CNI that supports NetworkPolicy, such as Calico or the EKS VPC CNI.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gymtracker-api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gymtracker-api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+        # The load test runs in this namespace.
+        - podSelector: {}
+      ports:
+        - port: http
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: admin

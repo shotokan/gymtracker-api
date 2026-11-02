@@ -1,0 +1,35 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gymtracker-api
+spec:
+  groups:
+    - name: gymtracker-api
+      rules:
+        - alert: GymTrackerHighErrorRate
+          expr: |
+            sum(rate(gymtracker_http_requests_total{status=~"5.."}[5m]))
+              / sum(rate(gymtracker_http_requests_total[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Más del 5% de las peticiones termina en error 5xx.
+        - alert: GymTrackerHighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(gymtracker_http_request_duration_seconds_bucket[5m]))) > 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: El percentil 95 de latencia supera 1 segundo.
+        - alert: GymTrackerAtMaxReplicas
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{horizontalpodautoscaler="gymtracker-api"}
+              >= kube_horizontalpodautoscaler_spec_max_replicas{horizontalpodautoscaler="gymtracker-api"}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: El HPA lleva 15 minutos en el máximo de réplicas.

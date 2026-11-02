@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gymtracker-api
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: gymtracker.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gymtracker-api
+                # Only the public port: metrics and health checks stay inside the cluster.
+                port:
+                  name: http

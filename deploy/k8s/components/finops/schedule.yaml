@@ -1,0 +1,112 @@
+# FinOps: turns the API off outside working hours. The HPA stays idle while the
+# Deployment is at zero replicas and takes over again after the scale-up.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: finops-scaler
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: finops-scaler
+rules:
+  - apiGroups: [apps]
+    resources: [deployments/scale]
+    resourceNames: [gymtracker-api]
+    verbs: [get, patch, update]
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [gymtracker-api]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-scaler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: finops-scaler
+subjects:
+  - kind: ServiceAccount
+    name: finops-scaler
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: finops-scale-down
+spec:
+  schedule: "0 20 * * 1-5"
+  timeZone: America/Mexico_City
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          serviceAccountName: finops-scaler
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: kubectl
+              image: registry.k8s.io/kubectl:v1.37.2
+              args: [scale, deployment/gymtracker-api, --replicas=0]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: finops-scale-up
+spec:
+  schedule: "0 7 * * 1-5"
+  timeZone: America/Mexico_City
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          serviceAccountName: finops-scaler
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: kubectl
+              image: registry.k8s.io/kubectl:v1.37.2
+              args: [scale, deployment/gymtracker-api, --replicas=1]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]

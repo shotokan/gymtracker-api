@@ -1,0 +1,14 @@
+# minikube and the ephemeral CI cluster: DynamoDB Local instead of AWS.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - dynamodb-local.yaml
+components:
+  - ../../components/finops
+images:
+  - name: gymtracker-api
+    newName: gymtracker-api
+    newTag: local
+patches:
+  - path: api-local.yaml

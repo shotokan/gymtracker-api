@@ -1,0 +1,53 @@
+# Generates CPU load with real logins, since each one runs bcrypt. It targets the
+# Service from inside the cluster so the traffic is spread across every replica.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gymtracker-loadtest
+  namespace: gymtracker
+spec:
+  parallelism: 4
+  completions: 4
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: load
+          image: curlimages/curl:8.23.0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              end=$(( $(date +%s) + ${DURATION_SECONDS} ))
+              while [ "$(date +%s)" -lt "$end" ]; do
+                curl -s -o /dev/null -X POST http://gymtracker-api/auth/login \
+                  -H 'Content-Type: application/json' \
+                  -d "{\"email\":\"${LOAD_EMAIL}\",\"password\":\"${LOAD_PASSWORD}\"}"
+              done
+          env:
+            - name: DURATION_SECONDS
+              value: "150"
+            - name: LOAD_EMAIL
+              value: loadtest@example.com
+            - name: LOAD_PASSWORD
+              value: load-test-password
+          resources:
+            requests:
+              cpu: 20m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
