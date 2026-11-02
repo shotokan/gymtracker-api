@@ -3,6 +3,7 @@
 # ── Build ─────────────────────────────────────────────────────────────────────
 # BUILDPLATFORM compiles natively and cross-compiles to the target, which is much
 # faster than building an arm64 image under emulation.
+# hadolint ignore=DL3029
 FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS build
 WORKDIR /src
 

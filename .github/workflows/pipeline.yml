@@ -66,9 +66,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Dockerfile
+        id: hadolint
         uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
         with:
           dockerfile: Dockerfile
+      - name: Report Dockerfile findings
+        if: failure() && steps.hadolint.outcome == 'failure'
+        run: echo "$HADOLINT_RESULTS" | sed 's/^/::error::/'
       - name: Dependencies and infrastructure code
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
@@ -79,6 +83,18 @@ jobs:
           exit-code: "1"
           skip-dirs: infra/node_modules
           trivyignores: .trivyignore
+          format: json
+          output: trivy-fs.json
+      - name: Report Trivy findings
+        if: always() && hashFiles('trivy-fs.json') != ''
+        run: |
+          jq -r '.Results[]? | .Target as $t | (
+              (.Vulnerabilities // [])[] | "::error::\(.Severity) \($t) \(.PkgName) \(.InstalledVersion) fixed in \(.FixedVersion) \(.VulnerabilityID)"
+            ), (
+              (.Misconfigurations // [])[] | select(.Status == "FAIL") | "::error::\(.Severity) \($t):\(.CauseMetadata.StartLine) \(.ID) \(.Title)"
+            ), (
+              (.Secrets // [])[] | "::error::\(.Severity) \($t):\(.StartLine) \(.RuleID)"
+            )' trivy-fs.json | sort -u | head -9
 
   codeql:
     name: SAST (CodeQL)
