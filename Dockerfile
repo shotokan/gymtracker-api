@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # Distroless has no shell or package manager, and nonroot runs as UID 65532.
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/ /app/
-USER nonroot:nonroot
+USER 65532:65532
 # 8080 serves the API; 9090 serves metrics and health checks.
 EXPOSE 8080 9090
 ENTRYPOINT ["/app/server"]
