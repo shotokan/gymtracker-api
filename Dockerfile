@@ -3,7 +3,7 @@
 # ── Build ─────────────────────────────────────────────────────────────────────
 # BUILDPLATFORM compiles natively and cross-compiles to the target, which is much
 # faster than building an arm64 image under emulation.
-FROM --platform=$BUILDPLATFORM golang:1.26.9-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS build
 WORKDIR /src
 
 # Dependencies first: this layer stays cached until go.mod or go.sum change.
