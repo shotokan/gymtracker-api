@@ -1,0 +1,39 @@
+── Primer administrador
+ok    201  registrar admin
+ok    401  una cuenta pendiente no entra
+ok    200  login de admin
+── Alta de un usuario
+ok    201  registrar usuario
+ok    409  correo repetido
+ok    401  usuario pendiente no entra
+ok    200  admin lista pendientes
+ok    204  admin aprueba
+ok    200  login de usuario
+── Permisos
+ok    401  sin token
+ok    403  token inválido
+ok    200  perfil propio
+ok    403  el admin no ve perfiles ajenos
+ok    403  un usuario no lista cuentas
+ok    403  el rol enviado al registrarse se ignora
+ok    404  ruta inexistente
+── Plan y entrenamiento
+ok    201  crear plan
+ok    204  activar plan
+ok    200  plan activo
+ok    201  agregar rutina
+ok    201  agregar ejercicio
+ok    200  listar ejercicios
+ok    201  registrar sesión
+ok    200  ver sesión
+ok    200  listar sesiones
+── Baja y último admin
+ok    204  darse de baja
+ok    401  una cuenta dada de baja no entra
+ok    200  admin lista bajas
+
+28 comprobaciones correctas
+NAME                    IMAGE                         COMMAND                  SERVICE    CREATED         STATUS                     PORTS
+gymtracker-api-1        gymtracker-api                "/app/server"            api        7 seconds ago   Up 4 seconds               127.0.0.1:8080->8080/tcp, 127.0.0.1:9090->9090/tcp
+gymtracker-dbinit-1     gymtracker-dbinit             "/app/dbinit"            dbinit     7 seconds ago   Exited (0) 4 seconds ago   
+gymtracker-dynamodb-1   amazon/dynamodb-local:3.3.2   "java -jar DynamoDBL…"   dynamodb   7 seconds ago   Up 7 seconds               127.0.0.1:8000->8000/tcp

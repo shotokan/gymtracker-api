@@ -1,0 +1,16 @@
+NAME                SCHEDULE       TIMEZONE              SUSPEND   ACTIVE   LAST SCHEDULE   AGE
+finops-scale-down   0 20 * * 1-5   America/Mexico_City   False     0        <none>          6m58s
+finops-scale-up     0 7 * * 1-5    America/Mexico_City   False     0        <none>          6m58s
+── Apagado
+job.batch/finops-scale-down-manual-1793661564 created
+job.batch/finops-scale-down-manual-1793661564 condition met
+deployment.apps/gymtracker-api scaled
+NAME             READY   UP-TO-DATE   AVAILABLE   AGE
+gymtracker-api   0/0     0            0           7m3s
+── Encendido
+job.batch/finops-scale-up-manual-1793661569 created
+job.batch/finops-scale-up-manual-1793661569 condition met
+deployment.apps/gymtracker-api scaled
+deployment "gymtracker-api" successfully rolled out
+NAME             READY   UP-TO-DATE   AVAILABLE   AGE
+gymtracker-api   1/1     1            1           7m8s

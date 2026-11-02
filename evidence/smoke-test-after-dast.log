@@ -1,0 +1,35 @@
+── Primer administrador
+ok    201  registrar admin
+ok    401  una cuenta pendiente no entra
+ok    200  login de admin
+── Alta de un usuario
+ok    201  registrar usuario
+ok    409  correo repetido
+ok    401  usuario pendiente no entra
+ok    200  admin lista pendientes
+ok    204  admin aprueba
+ok    200  login de usuario
+── Permisos
+ok    401  sin token
+ok    403  token inválido
+ok    200  perfil propio
+ok    403  el admin no ve perfiles ajenos
+ok    403  un usuario no lista cuentas
+ok    403  el rol enviado al registrarse se ignora
+ok    404  ruta inexistente
+── Plan y entrenamiento
+ok    201  crear plan
+ok    204  activar plan
+ok    200  plan activo
+ok    201  agregar rutina
+ok    201  agregar ejercicio
+ok    200  listar ejercicios
+ok    201  registrar sesión
+ok    200  ver sesión
+ok    200  listar sesiones
+── Baja y último admin
+ok    204  darse de baja
+ok    401  una cuenta dada de baja no entra
+ok    200  admin lista bajas
+
+28 comprobaciones correctas
