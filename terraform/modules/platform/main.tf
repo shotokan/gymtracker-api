@@ -37,8 +37,9 @@ resource "helm_release" "traefik" {
   repository = "https://traefik.github.io/charts"
   chart      = "traefik"
   version    = var.chart_versions.traefik
-  wait       = true
-  timeout    = 300
+  # Helm's wait timed out with the Traefik pod already ready, so scripts/deploy.sh
+  # waits for the rollout instead.
+  wait = false
 
   values = [yamlencode({
     ingressClass = {

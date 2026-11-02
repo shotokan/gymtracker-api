@@ -7,6 +7,8 @@ IMAGE="${1:?usage: deploy.sh <image> [overlay]}"
 OVERLAY="${2:-local}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+kubectl -n ingress rollout status deployment/traefik --timeout=180s
+
 kubectl apply -f "$ROOT/deploy/k8s/base/namespace.yaml"
 
 # Keep the existing secret so a redeploy does not invalidate the sessions in use.
