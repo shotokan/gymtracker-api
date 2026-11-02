@@ -47,6 +47,9 @@ resource "aws_kms_key" "secrets" {
   deletion_window_in_days = 7
 }
 
+# Without a VPN, a public endpoint is how a test environment gets administered. The
+# public_access_cidrs variable requires an explicit list and rejects 0.0.0.0/0.
+#trivy:ignore:AWS-0040
 resource "aws_eks_cluster" "this" {
   name     = var.name
   version  = var.kubernetes_version

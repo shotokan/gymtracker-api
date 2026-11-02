@@ -5,9 +5,6 @@ metadata:
 data:
   AWS_REGION: us-east-1
   DYNAMO_ENDPOINT: http://dynamodb-local:8000
-  # DynamoDB Local requires credentials but does not check them.
-  AWS_ACCESS_KEY_ID: local
-  AWS_SECRET_ACCESS_KEY: local
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -46,10 +43,18 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
 ---
 apiVersion: v1
 kind: Service

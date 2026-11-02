@@ -87,14 +87,27 @@ jobs:
           output: trivy-fs.json
       - name: Report Trivy findings
         if: always() && hashFiles('trivy-fs.json') != ''
+        run: scripts/trivy-report.sh trivy-fs.json
+      - name: Render the manifests that actually get deployed
+        if: always()
         run: |
-          jq -r '.Results[]? | .Target as $t | (
-              (.Vulnerabilities // [])[] | "::error::\(.Severity) \($t) \(.PkgName) \(.InstalledVersion) fixed in \(.FixedVersion) \(.VulnerabilityID)"
-            ), (
-              (.Misconfigurations // [])[] | select(.Status == "FAIL") | "::error::\(.Severity) \($t):\(.CauseMetadata.StartLine) \(.ID) \(.Title)"
-            ), (
-              (.Secrets // [])[] | "::error::\(.Severity) \($t):\(.StartLine) \(.RuleID)"
-            )' trivy-fs.json | sort -u | head -9
+          for overlay in local aws; do
+            mkdir -p "rendered/$overlay"
+            kubectl kustomize "deploy/k8s/overlays/$overlay" > "rendered/$overlay/all.yaml"
+          done
+      - name: Rendered manifests
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: rendered
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          trivyignores: .trivyignore
+          format: json
+          output: trivy-rendered.json
+      - name: Report rendered manifest findings
+        if: always() && hashFiles('trivy-rendered.json') != ''
+        run: scripts/trivy-report.sh trivy-rendered.json
 
   codeql:
     name: SAST (CodeQL)
@@ -177,6 +190,11 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+          format: json
+          output: trivy-image.json
+      - name: Report image findings
+        if: always() && hashFiles('trivy-image.json') != ''
+        run: scripts/trivy-report.sh trivy-image.json
       - name: Report the image size
         run: docker image ls gymtracker-api:scan --format 'Tamaño de la imagen - {{.Size}}' | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Push amd64 and arm64

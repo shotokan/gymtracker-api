@@ -10,5 +10,54 @@ images:
   - name: gymtracker-api
     newName: gymtracker-api
     newTag: local
+secretGenerator:
+  # DynamoDB Local requires credentials but does not check them: these are not real.
+  - name: gymtracker-local-credentials
+    literals:
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+    options:
+      disableNameSuffixHash: true
 patches:
-  - path: api-local.yaml
+  # Runs the table setup first and points the API at DynamoDB Local.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: gymtracker-api
+      spec:
+        template:
+          spec:
+            initContainers:
+              - name: dbinit
+                image: gymtracker-api:latest
+                command: ["/app/dbinit"]
+                envFrom:
+                  - configMapRef:
+                      name: gymtracker-local-config
+                  - secretRef:
+                      name: gymtracker-local-credentials
+                env:
+                  - name: DYNAMO_TABLE
+                    value: gym-tracker
+                resources:
+                  requests:
+                    cpu: 10m
+                    memory: 16Mi
+                  limits:
+                    cpu: 100m
+                    memory: 64Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  capabilities:
+                    drop: [ALL]
+            containers:
+              - name: api
+                envFrom:
+                  - configMapRef:
+                      name: gymtracker-config
+                  - configMapRef:
+                      name: gymtracker-local-config
+                  - secretRef:
+                      name: gymtracker-local-credentials
