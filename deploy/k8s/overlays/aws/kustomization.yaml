@@ -2,6 +2,7 @@
 # set the image and the role ARN from the Terraform outputs before using it.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+namespace: gymtracker
 resources:
   - ../../base
 components:

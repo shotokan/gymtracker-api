@@ -20,5 +20,7 @@ kubectl kustomize "$ROOT/deploy/k8s/overlays/$OVERLAY" \
   | kubectl apply -f -
 kubectl apply -k "$ROOT/deploy/k8s/monitoring"
 
-kubectl -n gymtracker rollout status deployment/dynamodb-local --timeout=180s || true
+if kubectl -n gymtracker get deployment dynamodb-local >/dev/null 2>&1; then
+  kubectl -n gymtracker rollout status deployment/dynamodb-local --timeout=180s
+fi
 kubectl -n gymtracker rollout status deployment/gymtracker-api --timeout=240s

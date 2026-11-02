@@ -91,8 +91,8 @@ resource "helm_release" "monitoring" {
       adminPassword = var.grafana_admin_password
       persistence   = { enabled = false }
       resources = {
-        requests = { cpu = "50m", memory = "128Mi" }
-        limits   = { memory = "256Mi" }
+        requests = { cpu = "50m", memory = "256Mi" }
+        limits   = { memory = "512Mi" }
       }
       "grafana.ini" = {
         "auth.anonymous" = {
