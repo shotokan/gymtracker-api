@@ -1,0 +1,8 @@
+# Allowlist: nothing reaches the build context unless it is listed here.
+*
+!cmd
+!internal
+!pkg
+!go.mod
+!go.sum
+**/*_test.go

@@ -1,0 +1,41 @@
+# Local stack: API + DynamoDB Local.
+#   cp .env.example .env   # then set JWT_SECRET
+#   docker compose up --build
+name: gymtracker
+
+x-dynamo-env: &dynamo-env
+  DYNAMO_TABLE: gym-tracker
+  DYNAMO_ENDPOINT: http://dynamodb:8000
+  AWS_REGION: us-east-1
+  # DynamoDB Local requires credentials but does not check them.
+  AWS_ACCESS_KEY_ID: local
+  AWS_SECRET_ACCESS_KEY: local
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:3.3.2
+    command: ["-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb"]
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  dbinit:
+    build: .
+    entrypoint: ["/app/dbinit"]
+    environment: *dynamo-env
+    depends_on:
+      - dynamodb
+
+  api:
+    build: .
+    environment:
+      <<: *dynamo-env
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9090:9090"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      dbinit:
+        condition: service_completed_successfully
