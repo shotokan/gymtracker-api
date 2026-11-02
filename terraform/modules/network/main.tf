@@ -27,6 +27,8 @@ resource "aws_internet_gateway" "this" {
   tags = { Name = var.name }
 }
 
+# See the FinOps note at the top of this file.
+#trivy:ignore:AWS-0164
 resource "aws_subnet" "public" {
   count = length(var.availability_zones)
 
