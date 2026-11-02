@@ -11,9 +11,8 @@ TABLE="${DYNAMO_TABLE:-gym-tracker}"
 EMAIL=loadtest@example.com
 
 sample() {
-  printf '%s  ' "$(date -u +%H:%M:%S)"
-  kubectl -n gymtracker get hpa gymtracker-api --no-headers \
-    | awk '{print "cpu=" $3 " min=" $4 " max=" $5 " replicas=" $6}'
+  kubectl -n gymtracker get hpa gymtracker-api -o jsonpath='{.status.currentMetrics[0].resource.current.averageUtilization} {.status.currentReplicas} {.status.desiredReplicas}{"\n"}' \
+    | awk -v now="$(date -u +%H:%M:%S)" '{print now "  cpu=" ($3 == "" ? "?" : $1) "%/70%  actuales=" ($3 == "" ? $1 : $2) "  deseadas=" ($3 == "" ? $2 : $3)}'
 }
 
 replicas() { kubectl -n gymtracker get deployment gymtracker-api -o jsonpath='{.status.readyReplicas}'; }

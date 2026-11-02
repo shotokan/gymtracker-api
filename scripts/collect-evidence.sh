@@ -30,7 +30,8 @@ query() {
   curl -sS "$PROMETHEUS/api/v1/targets?state=active" \
     | jq '[.data.activeTargets[] | select(.labels.namespace == "gymtracker") | {job: .labels.job, pod: .labels.pod, health, lastError}]'
   echo "── Peticiones totales por ruta y código"
-  query 'sum by (route, status) (gymtracker_http_requests_total)' \
+  # max_over_time also counts the pods that the HPA has already removed.
+  query 'sum by (route, status) (max_over_time(gymtracker_http_requests_total[30m]))' \
     | jq -r '.data.result | sort_by(.metric.route)[] | "\(.value[1])\t\(.metric.status)\t\(.metric.route)"'
   echo "── Latencia p95, en segundos, en los últimos 15 minutos"
   query 'histogram_quantile(0.95, sum by (le) (rate(gymtracker_http_request_duration_seconds_bucket[15m])))' \
