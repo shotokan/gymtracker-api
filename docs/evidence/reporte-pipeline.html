@@ -17,13 +17,13 @@
 </table>
 
 <h2>Punto de partida y arquitectura</h2>
-<p>GymTracker API es una API de entrenamientos en Go con arquitectura hexagonal. Se desplegaba solo como funciones Lambda con AWS CDK, y sus handlers dependen de eventos de API Gateway. La tarea requiere contenedores y Kubernetes, así que se añadió un adaptador sin cambiar la lógica de negocio.</p>
+<p>GymTracker API es un proyecto personal: una API de entrenamientos en Go con arquitectura hexagonal. Su despliegue habitual es con AWS CDK, como funciones Lambda, y por eso sus handlers dependen de eventos de API Gateway. La tarea requiere contenedores y Kubernetes, así que se añadió un adaptador sin cambiar la lógica de negocio.</p>
 <ul>
 <li><code>internal/httpapi</code> traduce peticiones HTTP a los eventos que esperan los routers existentes, y valida el JWT como lo hacía el authorizer de API Gateway.</li>
 <li><code>cmd/server</code> ejecuta toda la API en un solo proceso. El puerto 8080 sirve la API, y el 9090 sirve las métricas y los health checks.</li>
 <li>El Ingress solo enruta al puerto 8080, así que las métricas no quedan expuestas. El pipeline lo comprueba: <code>/metrics</code>, <code>/healthz</code> y <code>/readyz</code> responden 404 por el Ingress.</li>
 </ul>
-<p>El despliegue con Lambda y CDK sigue igual y no comparte infraestructura con el entorno de Kubernetes. El módulo de DynamoDB en Terraform rechaza el nombre de tabla de CDK para evitar colisiones.</p>
+<p>El proyecto conserva CDK: el despliegue con Lambda sigue igual y no comparte infraestructura con el entorno de Kubernetes. El módulo de DynamoDB en Terraform rechaza el nombre de tabla de CDK para evitar colisiones.</p>
 
 <h2>Docker</h2>
 <p>El <a href="https://github.com/shotokan/gymtracker-api/blob/feat/devops-pipeline/Dockerfile">Dockerfile</a> tiene dos etapas. Las dependencias se descargan en una capa aparte, de modo que quedan en caché hasta que cambie <code>go.mod</code>. La imagen final es distroless, sin shell ni gestor de paquetes, y corre con un UID sin privilegios.</p>

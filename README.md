@@ -1,14 +1,14 @@
 # GymTracker API
 
-A REST API for tracking gym workouts, built with Go. It deploys as serverless functions with AWS CDK, or as a container on Kubernetes.
+A personal project: a REST API for tracking gym workouts, built with Go. Its usual deployment is serverless functions with AWS CDK, and it can also run as a container on Kubernetes.
 
 ## 🚢 Pipeline DevOps (contenedores y Kubernetes)
 
-Además del despliegue serverless, la API corre como un solo proceso HTTP en un contenedor, con un pipeline completo en GitHub Actions: pruebas, análisis de seguridad, imagen, Terraform, despliegue en Kubernetes, DAST y evidencias.
+GymTracker API es un proyecto personal, y su despliegue habitual es con AWS CDK. Además de ese despliegue serverless, la API corre como un solo proceso HTTP en un contenedor, con un pipeline completo en GitHub Actions: pruebas, análisis de seguridad, imagen, Terraform, despliegue en Kubernetes, DAST y evidencias.
 
 Los dos despliegues comparten la lógica de negocio y no se afectan entre sí:
 
-| | Serverless (producción) | Kubernetes (pruebas) |
+| | Serverless con CDK (despliegue habitual) | Kubernetes (pruebas) |
 |---|---|---|
 | **Cómputo** | AWS Lambda | Pods en minikube |
 | **Entrada** | [`cmd/{auth,user,plan,session,authorizer}`](cmd/) | [`cmd/server`](cmd/server/main.go) |
