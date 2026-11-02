@@ -1,0 +1,323 @@
+# Full DevOps pipeline: test, SAST, image, Terraform, deploy to an ephemeral
+# Kubernetes cluster, DAST and evidence. Nothing here touches AWS, so it costs
+# nothing. deploy.yml keeps deploying the Lambda stack with CDK.
+#
+# Third-party actions are pinned to full commit SHAs, because a tag can be moved.
+name: Pipeline
+
+on:
+  push:
+    branches: [main, feat/devops-pipeline]
+    paths-ignore:
+      - "**.md"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# FinOps: a new push cancels the run it replaces.
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26.9"
+  TERRAFORM_VERSION: "1.15.8"
+  IMAGE: ghcr.io/shotokan/gymtracker-api
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Lint (includes gosec)
+        uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
+        with:
+          version: v2.12.2
+      - name: Test
+        run: go test ./... -race -count=1 -coverprofile=coverage.out
+      - name: Coverage
+        run: go tool cover -func=coverage.out | tail -1 | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Build
+        run: go build ./...
+
+  sast:
+    name: SAST
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Known vulnerabilities in Go code and dependencies
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: Secrets in the git history
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Dockerfile
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: Dockerfile
+      - name: Dependencies and infrastructure code
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: fs
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-dirs: infra/node_modules
+          trivyignores: .trivyignore
+
+  codeql:
+    name: SAST (CodeQL)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: github/codeql-action/init@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        with:
+          languages: go
+          queries: security-extended
+      - uses: github/codeql-action/analyze@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+
+  infrastructure:
+    name: Validate Terraform and manifests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Terraform format
+        run: terraform fmt -check -recursive terraform
+      - name: Terraform validate and test (mocked providers, no AWS)
+        run: |
+          for env in local aws; do
+            terraform -chdir="terraform/environments/$env" init -backend=false -input=false
+            terraform -chdir="terraform/environments/$env" validate
+            terraform -chdir="terraform/environments/$env" test
+          done
+      - name: Kubernetes schemas
+        run: |
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
+          for dir in overlays/local overlays/aws monitoring; do
+            kubectl kustomize "deploy/k8s/$dir" | "$(go env GOPATH)/bin/kubeconform" -strict -ignore-missing-schemas -summary
+          done
+
+  image:
+    name: Build and push image
+    needs: [test, sast, codeql, infrastructure]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ env.IMAGE }}:sha-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build for scanning
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: gymtracker-api:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: gymtracker-api:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Report the image size
+        run: docker image ls gymtracker-api:scan --format 'Tamaño de la imagen - {{.Size}}' | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Push amd64 and arm64
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          sbom: true
+          provenance: mode=max
+          tags: |
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+            ${{ env.IMAGE }}:${{ github.ref_name == 'main' && 'latest' || 'dev' }}
+          cache-from: type=gha
+
+  deploy:
+    name: Provision, deploy and DAST
+    needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write # Publishes the evidence branch
+      packages: read
+    env:
+      EVIDENCE: evidence
+      DEPLOY_IMAGE: ${{ needs.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the evidence directory
+        run: mkdir -p "$EVIDENCE"
+      - name: Create the cluster
+        uses: medyagh/setup-minikube@e9e035a86bbc3caea26a450bd4dbf9d0c453682e # v0.0.21
+        with:
+          driver: docker
+          cpus: "3"
+          memory: 10g
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: Provision the platform with Terraform
+        run: |
+          TF="terraform -chdir=terraform/environments/local"
+          $TF init -input=false
+          $TF apply -input=false -auto-approve -no-color \
+            -var "kubeconfig_path=$HOME/.kube/config" 2>&1 | tee "$EVIDENCE/terraform-apply.log"
+          $TF state list | tee "$EVIDENCE/terraform-state.txt"
+      - name: Load the pushed image
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker pull "$DEPLOY_IMAGE"
+          docker inspect --format 'imagen={{index .RepoDigests 0}}' "$DEPLOY_IMAGE" | tee "$EVIDENCE/image.txt"
+          minikube image load "$DEPLOY_IMAGE"
+      - name: Deploy the application
+        run: scripts/deploy.sh "$DEPLOY_IMAGE" 2>&1 | tee "$EVIDENCE/deploy.log"
+      - name: Open access to the cluster
+        run: |
+          nohup scripts/port-forwards.sh > port-forwards.log 2>&1 &
+          for _ in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: gymtracker.local' http://127.0.0.1:8081/plans || true)"
+            [ "$code" = "401" ] && exit 0
+            sleep 2
+          done
+          echo "the API is not reachable through the Ingress" >&2
+          exit 1
+      - name: Smoke test through the Ingress
+        run: scripts/smoke-test.sh 2>&1 | tee "$EVIDENCE/smoke-test.log"
+      - name: Metrics and health are not public
+        run: |
+          {
+            for path in /metrics /healthz /readyz; do
+              code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: gymtracker.local' "http://127.0.0.1:8081$path")"
+              echo "$path por el Ingress: $code"
+              [ "$code" = "404" ] || exit 1
+            done
+          } 2>&1 | tee "$EVIDENCE/admin-port-isolation.log"
+      - name: Autoscaling under load
+        run: scripts/hpa-demo.sh 2>&1 | tee "$EVIDENCE/hpa-demo.log"
+      - name: FinOps off-hours schedule
+        run: scripts/finops-demo.sh 2>&1 | tee "$EVIDENCE/finops-demo.log"
+      - name: Let Prometheus collect the last samples
+        run: sleep 60
+      - name: Collect metrics and screenshots
+        run: scripts/collect-evidence.sh "$EVIDENCE"
+      - name: Prepare the DAST user
+        id: dast
+        run: |
+          EMAIL="dast@example.com"
+          PASSWORD="dast-password"
+          curl -sS -o /dev/null -X POST http://127.0.0.1:8081/users -H 'Host: gymtracker.local' \
+            -H 'Content-Type: application/json' -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"name\":\"DAST\"}"
+          AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local AWS_REGION=us-east-1 aws dynamodb update-item \
+            --endpoint-url http://127.0.0.1:8000 --table-name gym-tracker \
+            --key "{\"PK\":{\"S\":\"USER#$EMAIL\"},\"SK\":{\"S\":\"PROFILE\"}}" \
+            --update-expression 'SET #s = :status' --expression-attribute-names '{"#s":"status"}' \
+            --expression-attribute-values '{":status":{"S":"active"}}'
+          TOKEN="$(curl -sS -X POST http://127.0.0.1:8081/auth/login -H 'Host: gymtracker.local' \
+            -H 'Content-Type: application/json' -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" | jq -r .token)"
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+      - name: DAST with OWASP ZAP
+        env:
+          DAST_TOKEN: ${{ steps.dast.outputs.token }}
+        run: |
+          mkdir -p zap && cp docs/openapi.yaml zap/ && chmod -R 777 zap
+          # Exit codes 1 and 2 mean alerts exist; the next step decides by severity.
+          docker run --rm --network host --add-host gymtracker.local:127.0.0.1 \
+            -v "$PWD/zap:/zap/wrk:rw" \
+            -e ZAP_AUTH_HEADER=Authorization \
+            -e ZAP_AUTH_HEADER_VALUE="Bearer $DAST_TOKEN" \
+            ghcr.io/zaproxy/zaproxy:2.17.0 zap-api-scan.py \
+            -t openapi.yaml -f openapi -O http://gymtracker.local:8081 \
+            -r zap-report.html -J zap-report.json -m 5 -T 15 -I \
+            2>&1 | tee "$EVIDENCE/zap-output.log" || true
+          # The token dies with this cluster, but it never belongs in a published file.
+          sed -E -i 's/Bearer [A-Za-z0-9._-]+/Bearer [REDACTED]/g' zap/zap-report.html zap/zap-report.json "$EVIDENCE/zap-output.log" || true
+          cp zap/zap-report.html zap/zap-report.json "$EVIDENCE/" || true
+      - name: Fail on high-risk DAST findings
+        run: |
+          test -s zap/zap-report.json
+          jq -r '.site[].alerts[] | "\(.riskdesc)\t\(.name)\t\(.count) casos"' zap/zap-report.json | sort \
+            | tee "$EVIDENCE/zap-summary.txt"
+          high="$(jq '[.site[].alerts[] | select(.riskcode == "3")] | length' zap/zap-report.json)"
+          echo "Hallazgos de riesgo alto: $high" | tee -a "$EVIDENCE/zap-summary.txt"
+          [ "$high" = "0" ]
+      - name: The API survived the scan
+        run: scripts/smoke-test.sh 2>&1 | tee "$EVIDENCE/smoke-test-after-dast.log"
+      - name: Record the failure context
+        if: failure()
+        run: |
+          {
+            kubectl get pods -A
+            kubectl -n gymtracker describe pods
+            kubectl -n gymtracker logs deployment/gymtracker-api --all-containers --tail=100
+            kubectl get events -A --sort-by=.lastTimestamp | tail -40
+          } > "$EVIDENCE/failure-context.txt" 2>&1 || true
+      - name: Keep the evidence as an artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evidence-${{ github.run_id }}
+          path: evidence
+          retention-days: 14
+      - name: Publish the evidence to a branch
+        if: always() && github.event_name != 'pull_request'
+        run: |
+          {
+            echo "run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "commit: ${GITHUB_SHA}"
+            echo "job status: ${{ job.status }}"
+          } > "$EVIDENCE/run-info.txt"
+          rm -rf /tmp/evidence-publish && mkdir /tmp/evidence-publish
+          cp -r "$EVIDENCE" /tmp/evidence-publish/
+          cd /tmp/evidence-publish
+          git init -q -b pipeline-evidence
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Evidence from run ${GITHUB_RUN_ID}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" pipeline-evidence
