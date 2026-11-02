@@ -52,6 +52,14 @@ func (m *mockDynamoClient) Query(ctx context.Context, params *dynamodb.QueryInpu
 	return args.Get(0).(*dynamodb.QueryOutput), args.Error(1)
 }
 
+func (m *mockDynamoClient) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error) {
+	args := m.Called(ctx, params)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*dynamodb.ScanOutput), args.Error(1)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 func TestUserRepository_FindByEmail_Success(t *testing.T) {
@@ -90,7 +98,7 @@ func TestUserRepository_FindByEmail_Success(t *testing.T) {
 	assert.Equal(t, "user-123", result.ID)
 	assert.Equal(t, "ivan@gym.com", result.Email)
 	assert.Equal(t, "Ivan", result.Name)
-	assert.True(t, result.Active)
+	assert.Equal(t, domain.StatusActive, result.Status)
 	client.AssertExpectations(t)
 }
 
@@ -201,7 +209,7 @@ func TestUserRepository_Save_Success(t *testing.T) {
 		Email:        "ivan@gym.com",
 		PasswordHash: "hashedPassword",
 		Name:         "Ivan",
-		Active:       true,
+		Status:       domain.StatusActive,
 		CreatedAt:    time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC),
 		UpdatedAt:    time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC),
 	}
@@ -237,7 +245,7 @@ func TestUserRepository_Save_AlreadyExists(t *testing.T) {
 		Email:        "ivan@gym.com",
 		PasswordHash: "hashedPassword",
 		Name:         "Ivan",
-		Active:       true,
+		Status:       domain.StatusActive,
 		CreatedAt:    time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}
@@ -265,7 +273,7 @@ func TestUserRepository_Save_Error(t *testing.T) {
 		Email:        "ivan@gym.com",
 		PasswordHash: "hashedPassword",
 		Name:         "Ivan",
-		Active:       true,
+		Status:       domain.StatusActive,
 		CreatedAt:    time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}
@@ -289,7 +297,7 @@ func TestUserRepository_Update_Success(t *testing.T) {
 		ID:        "user-123",
 		Email:     "ivan@gym.com",
 		Name:      "Ivan Updated",
-		Active:    false,
+		Status:    domain.StatusDeactivated,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -301,7 +309,7 @@ func TestUserRepository_Update_Success(t *testing.T) {
 		return *input.TableName == "gym-tracker" &&
 			pk.Value == "USER#ivan@gym.com" &&
 			sk.Value == "PROFILE" &&
-			*input.UpdateExpression == "SET #n = :name, active = :active, updated_at = :updatedAt" &&
+			*input.UpdateExpression == "SET #n = :name, #status = :status, updated_at = :updatedAt REMOVE #active" &&
 			*input.ConditionExpression == "attribute_exists(PK)"
 	})).Return(&dynamodb.UpdateItemOutput{}, nil)
 
@@ -321,7 +329,7 @@ func TestUserRepository_Update_NotFound(t *testing.T) {
 		ID:        "user-999",
 		Email:     "nonexistent@gym.com",
 		Name:      "Nobody",
-		Active:    true,
+		Status:    domain.StatusActive,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -348,7 +356,7 @@ func TestUserRepository_Update_Error(t *testing.T) {
 		ID:        "user-123",
 		Email:     "ivan@gym.com",
 		Name:      "Ivan",
-		Active:    true,
+		Status:    domain.StatusActive,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -370,7 +378,7 @@ func TestToRecord_KeyConstruction(t *testing.T) {
 		Email:        "test@gym.com",
 		PasswordHash: "hash123",
 		Name:         "Test User",
-		Active:       true,
+		Status:       domain.StatusActive,
 		CreatedAt:    time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}
@@ -383,4 +391,155 @@ func TestToRecord_KeyConstruction(t *testing.T) {
 	assert.Equal(t, "PROFILE", rec.GSI1SK)
 	assert.Equal(t, "user-abc", rec.ID)
 	assert.Equal(t, "test@gym.com", rec.Email)
+}
+
+func TestRecord_RoleRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	item, err := attributevalue.MarshalMap(toRecord(&domain.User{ID: "admin-1", Email: "admin@gym.com", Role: domain.RoleAdmin}))
+	require.NoError(t, err)
+
+	u, err := unmarshal(item)
+
+	require.NoError(t, err)
+	assert.Equal(t, domain.RoleAdmin, u.Role)
+}
+
+func TestUnmarshal_ItemWithoutRole(t *testing.T) {
+	t.Parallel()
+
+	u, err := unmarshal(map[string]types.AttributeValue{
+		"id": &types.AttributeValueMemberS{Value: "user-123"},
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, u.Role)
+}
+
+func TestUserRepository_FindByStatus_ReadsAllPages(t *testing.T) {
+	t.Parallel()
+
+	client := new(mockDynamoClient)
+	repo := NewUserRepository(client, "gym-tracker")
+
+	first, err := attributevalue.MarshalMap(toRecord(&domain.User{ID: "user-1", Email: "a@gym.com", Status: domain.StatusPending}))
+	require.NoError(t, err)
+	second, err := attributevalue.MarshalMap(toRecord(&domain.User{ID: "user-2", Email: "b@gym.com", Status: domain.StatusPending}))
+	require.NoError(t, err)
+	lastKey := map[string]types.AttributeValue{"PK": &types.AttributeValueMemberS{Value: "USER#a@gym.com"}}
+
+	client.On("Scan", mock.Anything, mock.MatchedBy(func(in *dynamodb.ScanInput) bool {
+		return in.ExclusiveStartKey == nil
+	})).Return(&dynamodb.ScanOutput{Items: []map[string]types.AttributeValue{first}, LastEvaluatedKey: lastKey}, nil)
+	client.On("Scan", mock.Anything, mock.MatchedBy(func(in *dynamodb.ScanInput) bool {
+		return in.ExclusiveStartKey != nil
+	})).Return(&dynamodb.ScanOutput{Items: []map[string]types.AttributeValue{second}}, nil)
+
+	users, err := repo.FindByStatus(context.Background(), domain.StatusPending)
+
+	require.NoError(t, err)
+	require.Len(t, users, 2)
+	assert.Equal(t, "user-1", users[0].ID)
+	assert.Equal(t, "user-2", users[1].ID)
+	client.AssertNumberOfCalls(t, "Scan", 2)
+}
+
+func TestUserRepository_FindByStatus_Filter(t *testing.T) {
+	t.Parallel()
+
+	const legacyFilter = "SK = :sk AND (#status = :status OR (attribute_not_exists(#status) AND #active = :legacy))"
+
+	tests := []struct {
+		name       string
+		status     string
+		wantFilter string
+		wantLegacy *bool
+	}{
+		{"pending no incluye registros antiguos", domain.StatusPending, "SK = :sk AND #status = :status", nil},
+		{"deactivated incluye active=false", domain.StatusDeactivated, legacyFilter, aws.Bool(false)},
+		{"active incluye active=true", domain.StatusActive, legacyFilter, aws.Bool(true)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := new(mockDynamoClient)
+			repo := NewUserRepository(client, "gym-tracker")
+
+			client.On("Scan", mock.Anything, mock.MatchedBy(func(in *dynamodb.ScanInput) bool {
+				if aws.ToString(in.FilterExpression) != tt.wantFilter {
+					return false
+				}
+				status, _ := in.ExpressionAttributeValues[":status"].(*types.AttributeValueMemberS)
+				if status == nil || status.Value != tt.status {
+					return false
+				}
+				legacy, hasLegacy := in.ExpressionAttributeValues[":legacy"].(*types.AttributeValueMemberBOOL)
+				if tt.wantLegacy == nil {
+					return !hasLegacy
+				}
+				return hasLegacy && legacy.Value == *tt.wantLegacy
+			})).Return(&dynamodb.ScanOutput{}, nil)
+
+			_, err := repo.FindByStatus(context.Background(), tt.status)
+
+			require.NoError(t, err)
+			client.AssertExpectations(t)
+		})
+	}
+}
+
+func TestUserRepository_FindByStatus_Error(t *testing.T) {
+	t.Parallel()
+
+	client := new(mockDynamoClient)
+	repo := NewUserRepository(client, "gym-tracker")
+
+	client.On("Scan", mock.Anything, mock.Anything).Return(nil, errors.New("dynamo error"))
+
+	_, err := repo.FindByStatus(context.Background(), domain.StatusPending)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dynamo scan")
+}
+
+func TestUnmarshal_ResolvesStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		item map[string]types.AttributeValue
+		want string
+	}{
+		{"antiguo activo", map[string]types.AttributeValue{"active": &types.AttributeValueMemberBOOL{Value: true}}, domain.StatusActive},
+		{"antiguo inactivo", map[string]types.AttributeValue{"active": &types.AttributeValueMemberBOOL{Value: false}}, domain.StatusDeactivated},
+		{"sin atributos no da acceso", map[string]types.AttributeValue{}, domain.StatusDeactivated},
+		{"pendiente", map[string]types.AttributeValue{"status": &types.AttributeValueMemberS{Value: domain.StatusPending}}, domain.StatusPending},
+		{"status tiene prioridad", map[string]types.AttributeValue{
+			"status": &types.AttributeValueMemberS{Value: domain.StatusDeactivated},
+			"active": &types.AttributeValueMemberBOOL{Value: true},
+		}, domain.StatusDeactivated},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			u, err := unmarshal(tt.item)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, u.Status)
+		})
+	}
+}
+
+func TestToRecord_DoesNotWriteLegacyActive(t *testing.T) {
+	t.Parallel()
+
+	item, err := attributevalue.MarshalMap(toRecord(&domain.User{ID: "user-1", Email: "a@gym.com", Status: domain.StatusActive}))
+
+	require.NoError(t, err)
+	assert.Contains(t, item, "status")
+	assert.NotContains(t, item, "active")
 }

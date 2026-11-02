@@ -14,9 +14,6 @@ import { Construct } from "constructs";
  * USER_ID#<id>            PROFILE                         Lookup user by ID
  * SESSION#<sessionID>     USER#<userID>                   Lookup session by ID
  * PLAN#<planID>           USER#<userID>                   Lookup plan by ID
- *
- * GSI2PK                  GSI2SK                          Description
- * GOOGLE#<googleID>       PROFILE                         Lookup user by Google ID
  */
 export class DatabaseConstruct extends Construct {
   public readonly table: dynamodb.Table;
@@ -42,14 +39,6 @@ export class DatabaseConstruct extends Construct {
       indexName: "GSI1",
       partitionKey: { name: "GSI1PK", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "GSI1SK", type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
-
-    // GSI2 for user lookup by Google ID (used in Google OAuth)
-    this.table.addGlobalSecondaryIndex({
-      indexName: "GSI2",
-      partitionKey: { name: "GSI2PK", type: dynamodb.AttributeType.STRING },
-      sortKey: { name: "GSI2SK", type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.ALL,
     });
   }

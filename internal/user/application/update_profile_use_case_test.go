@@ -22,7 +22,7 @@ func TestUpdateProfileUseCase_Execute_Success(t *testing.T) {
 		ID:        "user-123",
 		Email:     "ivan@gym.com",
 		Name:      "Ivan Old",
-		Active:    true,
+		Status:    domain.StatusActive,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -35,8 +35,9 @@ func TestUpdateProfileUseCase_Execute_Success(t *testing.T) {
 	uc := NewUpdateProfile(repo)
 
 	result, err := uc.Execute(context.Background(), input.UpdateProfileCommand{
-		UserID: "user-123",
-		Name:   "Ivan New",
+		ActorID: "user-123",
+		UserID:  "user-123",
+		Name:    "Ivan New",
 	})
 
 	require.NoError(t, err)
@@ -56,8 +57,9 @@ func TestUpdateProfileUseCase_Execute_UserNotFound(t *testing.T) {
 	uc := NewUpdateProfile(repo)
 
 	_, err := uc.Execute(context.Background(), input.UpdateProfileCommand{
-		UserID: "user-999",
-		Name:   "New Name",
+		ActorID: "user-999",
+		UserID:  "user-999",
+		Name:    "New Name",
 	})
 
 	require.Error(t, err)
@@ -75,7 +77,7 @@ func TestUpdateProfileUseCase_Execute_UpdateError(t *testing.T) {
 		ID:        "user-123",
 		Email:     "ivan@gym.com",
 		Name:      "Ivan Old",
-		Active:    true,
+		Status:    domain.StatusActive,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -86,11 +88,25 @@ func TestUpdateProfileUseCase_Execute_UpdateError(t *testing.T) {
 	uc := NewUpdateProfile(repo)
 
 	_, err := uc.Execute(context.Background(), input.UpdateProfileCommand{
-		UserID: "user-123",
-		Name:   "Ivan New",
+		ActorID: "user-123",
+		UserID:  "user-123",
+		Name:    "Ivan New",
 	})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "updating user")
 	repo.AssertExpectations(t)
+}
+
+func TestUpdateProfileUseCase_Execute_ForbiddenOnOtherUser(t *testing.T) {
+	t.Parallel()
+
+	repo := new(mockUserRepo)
+
+	uc := NewUpdateProfile(repo)
+
+	_, err := uc.Execute(context.Background(), input.UpdateProfileCommand{ActorID: "user-456", UserID: "user-123", Name: "Hacked"})
+
+	require.ErrorIs(t, err, domain.ErrForbidden)
+	repo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
 }

@@ -9,6 +9,10 @@ import (
 	"github.com/shotokan/gymtracker-api/internal/auth/port/output"
 )
 
+type jwtGenerator interface {
+	Generate(userID, email string) (string, error)
+}
+
 type loginUseCase struct {
 	userRepo output.UserRepository
 	hasher   output.PasswordHasher
@@ -38,6 +42,12 @@ func (uc *loginUseCase) Execute(ctx context.Context, cmd input.LoginCommand) (in
 	}
 
 	if err = uc.hasher.Compare(u.PasswordHash, cmd.Password); err != nil {
+		return input.LoginResult{}, domain.ErrInvalidCreds
+	}
+
+	// Same error as bad credentials: don't reveal that the account exists
+	// but was deactivated
+	if !u.IsActive() {
 		return input.LoginResult{}, domain.ErrInvalidCreds
 	}
 

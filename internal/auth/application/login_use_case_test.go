@@ -35,24 +35,6 @@ func (m *mockUserRepo) FindByID(ctx context.Context, id string) (*userDomain.Use
 	return args.Get(0).(*userDomain.User), args.Error(1)
 }
 
-func (m *mockUserRepo) FindByGoogleID(ctx context.Context, googleID string) (*userDomain.User, error) {
-	args := m.Called(ctx, googleID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*userDomain.User), args.Error(1)
-}
-
-func (m *mockUserRepo) Save(ctx context.Context, u *userDomain.User) error {
-	args := m.Called(ctx, u)
-	return args.Error(0)
-}
-
-func (m *mockUserRepo) Update(ctx context.Context, u *userDomain.User) error {
-	args := m.Called(ctx, u)
-	return args.Error(0)
-}
-
 type mockPasswordHasher struct {
 	mock.Mock
 }
@@ -83,7 +65,7 @@ func TestLoginUseCase_Execute_Success(t *testing.T) {
 		Email:        "test@example.com",
 		PasswordHash: "$2a$10$hashedpassword",
 		Name:         "Test User",
-		Active:       true,
+		Status:       userDomain.StatusActive,
 		CreatedAt:    time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}
@@ -141,7 +123,7 @@ func TestLoginUseCase_Execute_InvalidPassword(t *testing.T) {
 		Email:        "test@example.com",
 		PasswordHash: "$2a$10$hashedpassword",
 		Name:         "Test User",
-		Active:       true,
+		Status:       userDomain.StatusActive,
 		CreatedAt:    time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}
@@ -161,4 +143,44 @@ func TestLoginUseCase_Execute_InvalidPassword(t *testing.T) {
 	assert.ErrorIs(t, err, domain.ErrInvalidCreds)
 	repo.AssertExpectations(t)
 	hasher.AssertExpectations(t)
+}
+
+func TestLoginUseCase_Execute_InactiveUser(t *testing.T) {
+	t.Parallel()
+
+	for _, status := range []string{userDomain.StatusPending, userDomain.StatusDeactivated} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+
+			repo := new(mockUserRepo)
+			hasher := new(mockPasswordHasher)
+			jwtGen := new(mockJWTGen)
+
+			user := &userDomain.User{
+				ID:           "user-123",
+				Email:        "test@example.com",
+				PasswordHash: "$2a$10$hashedpassword",
+				Name:         "Test User",
+				Status:       status,
+				CreatedAt:    time.Now().UTC(),
+				UpdatedAt:    time.Now().UTC(),
+			}
+
+			repo.On("FindByEmail", mock.Anything, "test@example.com").Return(user, nil)
+			hasher.On("Compare", "$2a$10$hashedpassword", "password123").Return(nil)
+
+			uc := NewLogin(repo, hasher, jwtGen)
+
+			_, err := uc.Execute(context.Background(), input.LoginCommand{
+				Email:    "test@example.com",
+				Password: "password123",
+			})
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, domain.ErrInvalidCreds)
+			repo.AssertExpectations(t)
+			hasher.AssertExpectations(t)
+			jwtGen.AssertNotCalled(t, "Generate", mock.Anything, mock.Anything)
+		})
+	}
 }

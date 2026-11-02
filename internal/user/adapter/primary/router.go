@@ -14,6 +14,8 @@ type Router struct {
 	getProfile    *GetProfileHandler
 	updateProfile *UpdateProfileHandler
 	deactivate    *DeactivateHandler
+	activate      *ActivateHandler
+	listByStatus  *ListByStatusHandler
 }
 
 // NewRouter construye el router con los handlers necesarios para cada ruta.
@@ -22,12 +24,16 @@ func NewRouter(
 	get *GetProfileHandler,
 	upd *UpdateProfileHandler,
 	deac *DeactivateHandler,
+	act *ActivateHandler,
+	list *ListByStatusHandler,
 ) *Router {
 	return &Router{
 		register:      reg,
 		getProfile:    get,
 		updateProfile: upd,
 		deactivate:    deac,
+		activate:      act,
+		listByStatus:  list,
 	}
 }
 
@@ -38,6 +44,9 @@ func (r *Router) Handle(ctx context.Context, req events.APIGatewayProxyRequest) 
 	case req.HTTPMethod == http.MethodPost && req.Resource == "/users":
 		return r.register.Handle(ctx, req)
 
+	case req.HTTPMethod == http.MethodGet && req.Resource == "/users":
+		return r.listByStatus.Handle(ctx, req)
+
 	case req.HTTPMethod == http.MethodGet && req.Resource == "/users/{id}":
 		return r.getProfile.Handle(ctx, req)
 
@@ -46,6 +55,9 @@ func (r *Router) Handle(ctx context.Context, req events.APIGatewayProxyRequest) 
 
 	case req.HTTPMethod == http.MethodDelete && req.Resource == "/users/{id}":
 		return r.deactivate.Handle(ctx, req)
+
+	case req.HTTPMethod == http.MethodPatch && req.Resource == "/users/{id}/activate":
+		return r.activate.Handle(ctx, req)
 
 	default:
 		return jsonResp(http.StatusNotFound, errResponse{Message: "route not found"})

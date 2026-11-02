@@ -30,12 +30,16 @@ func main() {
 	getProfile := application.NewGetProfile(repo)
 	updateProfile := application.NewUpdateProfile(repo)
 	deactivate := application.NewDeactivate(repo)
+	activate := application.NewActivate(repo)
+	listByStatus := application.NewListByStatus(repo)
 
 	router := primary.NewRouter(
 		primary.NewRegisterHandler(register),
 		primary.NewGetProfileHandler(getProfile),
 		primary.NewUpdateProfileHandler(updateProfile),
 		primary.NewDeactivateHandler(deactivate),
+		primary.NewActivateHandler(activate),
+		primary.NewListByStatusHandler(listByStatus),
 	)
 
 	lambda.Start(router.Handle)

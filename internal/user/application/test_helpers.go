@@ -30,12 +30,12 @@ func (m *mockUserRepo) FindByID(ctx context.Context, id string) (*domain.User, e
 }
 
 //nolint:wrapcheck // Test mocks don't need error wrapping
-func (m *mockUserRepo) FindByGoogleID(ctx context.Context, googleID string) (*domain.User, error) {
-	args := m.Called(ctx, googleID)
+func (m *mockUserRepo) FindByStatus(ctx context.Context, status string) ([]domain.User, error) {
+	args := m.Called(ctx, status)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*domain.User), args.Error(1)
+	return args.Get(0).([]domain.User), args.Error(1)
 }
 
 //nolint:wrapcheck // Test mocks don't need error wrapping

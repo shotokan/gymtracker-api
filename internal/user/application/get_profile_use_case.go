@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/shotokan/gymtracker-api/internal/user/domain"
 	"github.com/shotokan/gymtracker-api/internal/user/port/input"
 	"github.com/shotokan/gymtracker-api/internal/user/port/output"
 )
@@ -18,6 +19,11 @@ func NewGetProfile(repo output.UserRepository) input.GetProfileUseCase {
 
 // Execute realiza la obtención del perfil de usuario, encontrándolo por ID. Retorna el perfil o un error si ocurre algún problema durante el proceso.
 func (uc *getProfileUseCase) Execute(ctx context.Context, cmd input.GetProfileCommand) (input.GetProfileResult, error) {
+	// Cada usuario solo puede consultar su propio perfil
+	if cmd.ActorID != cmd.UserID {
+		return input.GetProfileResult{}, domain.ErrForbidden
+	}
+
 	u, err := uc.repo.FindByID(ctx, cmd.UserID)
 	if err != nil {
 		return input.GetProfileResult{}, fmt.Errorf("finding user: %w", err)
@@ -27,7 +33,8 @@ func (uc *getProfileUseCase) Execute(ctx context.Context, cmd input.GetProfileCo
 		ID:        u.ID,
 		Email:     u.Email,
 		Name:      u.Name,
-		Active:    u.Active,
+		Active:    u.IsActive(),
+		Status:    u.Status,
 		CreatedAt: u.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}, nil
 }

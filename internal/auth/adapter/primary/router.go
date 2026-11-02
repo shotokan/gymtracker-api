@@ -10,19 +10,12 @@ import (
 
 // Router dispatches API Gateway events to the correct auth handler.
 type Router struct {
-	loginHandler      *LoginHandler
-	googleAuthHandler *GoogleAuthHandler
+	loginHandler *LoginHandler
 }
 
 // NewRouter constructs the router with all auth handlers.
-func NewRouter(
-	loginHandler *LoginHandler,
-	googleAuthHandler *GoogleAuthHandler,
-) *Router {
-	return &Router{
-		loginHandler:      loginHandler,
-		googleAuthHandler: googleAuthHandler,
-	}
+func NewRouter(loginHandler *LoginHandler) *Router {
+	return &Router{loginHandler: loginHandler}
 }
 
 // Handle dispatches the incoming request to the correct handler.
@@ -33,8 +26,6 @@ func (r *Router) Handle(ctx context.Context, req events.APIGatewayProxyRequest) 
 	switch path {
 	case "/auth/login":
 		return r.loginHandler.Handle(ctx, req)
-	case "/auth/google":
-		return r.googleAuthHandler.Handle(ctx, req)
 	default:
 		return jsonResp(http.StatusNotFound, errResponse{"route not found"})
 	}

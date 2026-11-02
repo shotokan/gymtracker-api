@@ -21,7 +21,7 @@ func TestGetProfileUseCase_Execute_Success(t *testing.T) {
 		ID:        "user-123",
 		Email:     "ivan@gym.com",
 		Name:      "Ivan",
-		Active:    true,
+		Status:    domain.StatusActive,
 		CreatedAt: time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC),
 		UpdatedAt: time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC),
 	}
@@ -31,7 +31,8 @@ func TestGetProfileUseCase_Execute_Success(t *testing.T) {
 	uc := NewGetProfile(repo)
 
 	result, err := uc.Execute(context.Background(), input.GetProfileCommand{
-		UserID: "user-123",
+		ActorID: "user-123",
+		UserID:  "user-123",
 	})
 
 	require.NoError(t, err)
@@ -39,6 +40,7 @@ func TestGetProfileUseCase_Execute_Success(t *testing.T) {
 	assert.Equal(t, "ivan@gym.com", result.Email)
 	assert.Equal(t, "Ivan", result.Name)
 	assert.True(t, result.Active)
+	assert.Equal(t, domain.StatusActive, result.Status)
 	assert.Equal(t, "2024-01-15T10:00:00Z", result.CreatedAt)
 	repo.AssertExpectations(t)
 }
@@ -53,11 +55,25 @@ func TestGetProfileUseCase_Execute_UserNotFound(t *testing.T) {
 	uc := NewGetProfile(repo)
 
 	_, err := uc.Execute(context.Background(), input.GetProfileCommand{
-		UserID: "user-999",
+		ActorID: "user-999",
+		UserID:  "user-999",
 	})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "finding user")
 	assert.ErrorIs(t, err, domain.ErrNotFound)
 	repo.AssertExpectations(t)
+}
+
+func TestGetProfileUseCase_Execute_ForbiddenOnOtherUser(t *testing.T) {
+	t.Parallel()
+
+	repo := new(mockUserRepo)
+
+	uc := NewGetProfile(repo)
+
+	_, err := uc.Execute(context.Background(), input.GetProfileCommand{ActorID: "user-456", UserID: "user-123"})
+
+	require.ErrorIs(t, err, domain.ErrForbidden)
+	repo.AssertNotCalled(t, "FindByID", mock.Anything, mock.Anything)
 }

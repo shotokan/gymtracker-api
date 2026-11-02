@@ -1,0 +1,15 @@
+import "source-map-support/register";
+import { App } from "aws-cdk-lib";
+import { GymTrackerStack } from "../lib/gym-tracker-stack";
+
+const app = new App();
+
+new GymTrackerStack(app, "GymTrackerStack", {
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: process.env.CDK_DEFAULT_REGION ?? "us-east-1",
+  },
+  description: "GymTracker API — Lambda + DynamoDB + API Gateway",
+});
+
+app.synth();

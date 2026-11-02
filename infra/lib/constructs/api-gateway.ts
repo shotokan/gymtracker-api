@@ -55,14 +55,10 @@ export class ApiGatewayConstruct extends Construct {
     };
 
     // ── /auth ──────────────────────────────────────────────────────────────
-    // Single Lambda handles both /auth/login and /auth/google
     const authInt = new apigateway.LambdaIntegration(props.authFn);
     const auth = this.api.root.addResource("auth");
     auth.addResource("login").addMethod("POST", authInt, {
       operationName: "Login",
-    });
-    auth.addResource("google").addMethod("POST", authInt, {
-      operationName: "GoogleAuth",
     });
 
     // ── /users ─────────────────────────────────────────────────────────────
@@ -71,6 +67,12 @@ export class ApiGatewayConstruct extends Construct {
     // POST /users → registro público (sin authorizer)
     users.addMethod("POST", new apigateway.LambdaIntegration(props.userFn), {
       operationName: "RegisterUser",
+    });
+
+    // GET /users?status=pending|deactivated → solo administradores (validado en el caso de uso)
+    users.addMethod("GET", new apigateway.LambdaIntegration(props.userFn), {
+      ...authMethod,
+      operationName: "ListUsersByStatus",
     });
 
     // /users/{id} → protegido con JWT
@@ -87,6 +89,14 @@ export class ApiGatewayConstruct extends Construct {
       ...authMethod,
       operationName: "DeactivateUser",
     });
+
+    // /users/{id}/activate → solo administradores (validado en el caso de uso)
+    user
+      .addResource("activate")
+      .addMethod("PATCH", new apigateway.LambdaIntegration(props.userFn), {
+        ...authMethod,
+        operationName: "ActivateUser",
+      });
 
     // ── /plans ─────────────────────────────────────────────────────────────
     const planInt = new apigateway.LambdaIntegration(props.planFn);

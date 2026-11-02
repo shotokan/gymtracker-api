@@ -42,7 +42,8 @@ func (uc *registerUseCase) Execute(ctx context.Context, cmd input.RegisterComman
 		Email:        cmd.Email,
 		PasswordHash: hash,
 		Name:         cmd.Name,
-		Active:       true,
+		Role:         domain.RoleUser,
+		Status:       domain.StatusPending,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}

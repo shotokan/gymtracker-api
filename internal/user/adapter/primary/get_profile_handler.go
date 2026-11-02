@@ -21,13 +21,21 @@ func NewGetProfileHandler(uc input.GetProfileUseCase) *GetProfileHandler {
 
 // Handle procesa la solicitud de obtener el perfil de usuario, extrayendo el ID del usuario de los parámetros de la ruta y delegando al caso de uso. Retorna el perfil del usuario o un error adecuado.
 func (h *GetProfileHandler) Handle(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	actorID := extractUserID(req)
+	if actorID == "" {
+		return jsonResp(http.StatusUnauthorized, errResponse{"unauthorized"})
+	}
+
 	userID := req.PathParameters["id"]
 	if userID == "" {
 		return jsonResp(http.StatusBadRequest, errResponse{"missing user id"})
 	}
 
-	result, err := h.useCase.Execute(ctx, input.GetProfileCommand{UserID: userID})
+	result, err := h.useCase.Execute(ctx, input.GetProfileCommand{ActorID: actorID, UserID: userID})
 	if err != nil {
+		if errors.Is(err, domain.ErrForbidden) {
+			return jsonResp(http.StatusForbidden, errResponse{"forbidden"})
+		}
 		if errors.Is(err, domain.ErrNotFound) {
 			return jsonResp(http.StatusNotFound, errResponse{"user not found"})
 		}

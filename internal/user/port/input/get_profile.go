@@ -3,9 +3,10 @@ package input
 
 import "context"
 
-// GetProfileCommand representa la solicitud de obtención del perfil de usuario, conteniendo el ID del usuario.
+// GetProfileCommand representa la solicitud de obtención del perfil de usuario, conteniendo el ID de quien la realiza y el del usuario consultado.
 type GetProfileCommand struct {
-	UserID string
+	ActorID string
+	UserID  string
 }
 
 // GetProfileResult representa el resultado de la obtención del perfil de usuario, incluyendo su ID, email, nombre, estado activo y fecha de creación.
@@ -14,6 +15,7 @@ type GetProfileResult struct {
 	Email     string `json:"email"`
 	Name      string `json:"name"`
 	Active    bool   `json:"active"`
+	Status    string `json:"status"`
 	CreatedAt string `json:"created_at"`
 }
 

@@ -50,27 +50,20 @@ export class LambdasConstruct extends Construct {
         removalPolicy: RemovalPolicy.DESTROY,
       });
 
-    // ── Auth (Login + Google OAuth) ────────────────────────────────────────
-    // Unified Lambda that handles both /auth/login and /auth/google endpoints
-    // Requires GOOGLE_CLIENT_ID to be set in SSM Parameter Store
-    const googleClientId = ssm.StringParameter.valueForStringParameter(
-      this,
-      "/gym-tracker/google-client-id",
-    );
+    // ── Auth (Login) ───────────────────────────────────────────────────────
     this.authFn = new lambda.Function(this, "AuthFn", {
       ...base,
       functionName: "gym-tracker-auth",
-      description: "Autentica usuarios (email/password y Google OAuth)",
+      description: "Autentica usuarios (email/password)",
       code: this.goCode("./cmd/auth"),
       logGroup: logGroup("auth"),
       environment: {
         TABLE_NAME: props.table.tableName,
-        GOOGLE_CLIENT_ID: googleClientId,
         JWT_SECRET: jwtSecret,
       },
     });
-    // Read/Write: may create new users (Google OAuth) or just read (login)
-    props.table.grantReadWriteData(this.authFn);
+    // Read-only: login only looks up existing users
+    props.table.grantReadData(this.authFn);
 
     // ── Authorizer ─────────────────────────────────────────────────────────
     this.authorizerFn = new lambda.Function(this, "AuthorizerFn", {

@@ -8,19 +8,13 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/google/uuid"
 
 	"github.com/shotokan/gymtracker-api/internal/auth/adapter/primary"
 	"github.com/shotokan/gymtracker-api/internal/auth/adapter/secondary/bcrypt"
-	googleValidator "github.com/shotokan/gymtracker-api/internal/auth/adapter/secondary/google"
 	"github.com/shotokan/gymtracker-api/internal/auth/adapter/secondary/jwt"
 	"github.com/shotokan/gymtracker-api/internal/auth/application"
 	userRepo "github.com/shotokan/gymtracker-api/internal/user/adapter/secondary/dynamo"
 )
-
-type uuidGen struct{}
-
-func (g *uuidGen) New() string { return uuid.NewString() }
 
 func main() {
 	ctx := context.Background()
@@ -42,33 +36,17 @@ func main() {
 		panic("JWT_SECRET environment variable is required")
 	}
 
-	googleClientID := os.Getenv("GOOGLE_CLIENT_ID")
-	if googleClientID == "" {
-		panic("GOOGLE_CLIENT_ID environment variable is required")
-	}
-
 	// Initialize shared dependencies
 	userRepository := userRepo.NewUserRepository(db, tableName)
 	jwtTokenGenerator := jwt.NewTokenGenerator(jwtSecret, 24*time.Hour)
-	idGen := &uuidGen{}
 
 	// Initialize Login use case and handler
 	passwordHasher := bcrypt.NewPasswordHasher()
 	loginUC := application.NewLogin(userRepository, passwordHasher, jwtTokenGenerator)
 	loginHandler := primary.NewLoginHandler(loginUC)
 
-	// Initialize Google Auth use case and handler
-	googleTokenValidator := googleValidator.NewTokenValidator(googleClientID)
-	googleAuthUC := application.NewGoogleAuth(
-		googleTokenValidator,
-		userRepository,
-		idGen,
-		jwtTokenGenerator,
-	)
-	googleAuthHandler := primary.NewGoogleAuthHandler(googleAuthUC)
-
 	// Initialize router
-	router := primary.NewRouter(loginHandler, googleAuthHandler)
+	router := primary.NewRouter(loginHandler)
 
 	// Start Lambda
 	lambda.Start(router.Handle)

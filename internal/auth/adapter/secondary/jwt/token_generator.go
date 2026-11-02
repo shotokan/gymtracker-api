@@ -37,6 +37,7 @@ func (g *TokenGenerator) Generate(userID, email string) (string, error) {
 		UserID: userID,
 		Email:  email,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID, // the authorizer reads the user ID from sub
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(g.expiration)),
 			Issuer:    "gymtracker-api",

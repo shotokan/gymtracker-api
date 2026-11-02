@@ -22,6 +22,8 @@ type client interface {
 	UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error)
 	// Query is required for GSI lookups — GetItem only works with the main table key.
 	Query(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error)
+	// Scan is required to list users by status: no index covers that attribute.
+	Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error)
 }
 
 type record struct {
@@ -29,16 +31,16 @@ type record struct {
 	SK           string `dynamodbav:"SK"`
 	GSI1PK       string `dynamodbav:"GSI1PK"`
 	GSI1SK       string `dynamodbav:"GSI1SK"`
-	GSI2PK       string `dynamodbav:"GSI2PK,omitempty"` // For Google ID lookup
-	GSI2SK       string `dynamodbav:"GSI2SK,omitempty"`
 	ID           string `dynamodbav:"id"`
 	Email        string `dynamodbav:"email"`
 	PasswordHash string `dynamodbav:"password_hash"`
-	GoogleID     string `dynamodbav:"google_id,omitempty"`
 	Name         string `dynamodbav:"name"`
-	Active       bool   `dynamodbav:"active"`
-	CreatedAt    string `dynamodbav:"created_at"`
-	UpdatedAt    string `dynamodbav:"updated_at"`
+	Role         string `dynamodbav:"role,omitempty"`
+	Status       string `dynamodbav:"status,omitempty"`
+	// Active is legacy: it is read from items that have no status yet and never written.
+	Active    bool   `dynamodbav:"active,omitempty"`
+	CreatedAt string `dynamodbav:"created_at"`
+	UpdatedAt string `dynamodbav:"updated_at"`
 }
 
 // UserRepository implements output.UserRepository using DynamoDB.
@@ -93,25 +95,50 @@ func (r *UserRepository) FindByID(ctx context.Context, id string) (*domain.User,
 	return unmarshal(out.Items[0])
 }
 
-// FindByGoogleID looks up a user via the GSI2 index: GSI2PK = "GOOGLE#<googleID>", GSI2SK = "PROFILE".
-func (r *UserRepository) FindByGoogleID(ctx context.Context, googleID string) (*domain.User, error) {
-	out, err := r.db.Query(ctx, &dynamodb.QueryInput{
-		TableName:              aws.String(r.tableName),
-		IndexName:              aws.String("GSI2"),
-		KeyConditionExpression: aws.String("GSI2PK = :pk AND GSI2SK = :sk"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":pk": &types.AttributeValueMemberS{Value: googleIDPK(googleID)},
-			":sk": &types.AttributeValueMemberS{Value: "PROFILE"},
-		},
-		Limit: aws.Int32(1),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("dynamo query by google id: %w", err)
+// FindByStatus returns every user with the given status. It scans the whole single table, so its
+// cost grows with plans and sessions too. Each page holds at most 1 MB, hence the loop.
+func (r *UserRepository) FindByStatus(ctx context.Context, status string) ([]domain.User, error) {
+	filter := "SK = :sk AND #status = :status"
+	names := map[string]string{"#status": "status"}
+	values := map[string]types.AttributeValue{
+		":sk":     &types.AttributeValueMemberS{Value: "PROFILE"},
+		":status": &types.AttributeValueMemberS{Value: status},
 	}
-	if len(out.Items) == 0 {
-		return nil, domain.ErrNotFound
+	// Legacy items have no status, and none of them can be pending (see statusOf).
+	if status != domain.StatusPending {
+		filter = "SK = :sk AND (#status = :status OR (attribute_not_exists(#status) AND #active = :legacy))"
+		names["#active"] = "active"
+		values[":legacy"] = &types.AttributeValueMemberBOOL{Value: status == domain.StatusActive}
 	}
-	return unmarshal(out.Items[0])
+
+	users := []domain.User{}
+	var startKey map[string]types.AttributeValue
+
+	for {
+		out, err := r.db.Scan(ctx, &dynamodb.ScanInput{
+			TableName:                 aws.String(r.tableName),
+			FilterExpression:          aws.String(filter),
+			ExpressionAttributeNames:  names,
+			ExpressionAttributeValues: values,
+			ExclusiveStartKey:         startKey,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("dynamo scan users by status: %w", err)
+		}
+
+		for _, item := range out.Items {
+			u, err := unmarshal(item)
+			if err != nil {
+				return nil, err
+			}
+			users = append(users, *u)
+		}
+
+		if len(out.LastEvaluatedKey) == 0 {
+			return users, nil
+		}
+		startKey = out.LastEvaluatedKey
+	}
 }
 
 // Save persists a new user. Uses a condition expression to prevent overwriting existing users.
@@ -137,7 +164,7 @@ func (r *UserRepository) Save(ctx context.Context, u *domain.User) error {
 	return nil
 }
 
-// Update modifies the name, active status and updated_at of an existing user.
+// Update modifies the name, status and updated_at of an existing user, and drops the legacy active attribute.
 func (r *UserRepository) Update(ctx context.Context, u *domain.User) error {
 	_, err := r.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: aws.String(r.tableName),
@@ -145,13 +172,15 @@ func (r *UserRepository) Update(ctx context.Context, u *domain.User) error {
 			"PK": &types.AttributeValueMemberS{Value: emailPK(u.Email)},
 			"SK": &types.AttributeValueMemberS{Value: "PROFILE"},
 		},
-		UpdateExpression: aws.String("SET #n = :name, active = :active, updated_at = :updatedAt"),
+		UpdateExpression: aws.String("SET #n = :name, #status = :status, updated_at = :updatedAt REMOVE #active"),
 		ExpressionAttributeNames: map[string]string{
-			"#n": "name", // "name" is a reserved word in DynamoDB
+			"#n":      "name",   // "name" is a reserved word in DynamoDB
+			"#status": "status", // "status" is a reserved word in DynamoDB
+			"#active": "active",
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":name":      &types.AttributeValueMemberS{Value: u.Name},
-			":active":    &types.AttributeValueMemberBOOL{Value: u.Active},
+			":status":    &types.AttributeValueMemberS{Value: u.Status},
 			":updatedAt": &types.AttributeValueMemberS{Value: u.UpdatedAt.Format(time.RFC3339)},
 		},
 		ConditionExpression: aws.String("attribute_exists(PK)"),
@@ -172,10 +201,8 @@ func emailPK(email string) string { return "USER#" + email }
 
 func idPK(id string) string { return "USER_ID#" + id }
 
-func googleIDPK(googleID string) string { return "GOOGLE#" + googleID }
-
 func toRecord(u *domain.User) record {
-	rec := record{
+	return record{
 		PK:           emailPK(u.Email),
 		SK:           "PROFILE",
 		GSI1PK:       idPK(u.ID),
@@ -183,18 +210,25 @@ func toRecord(u *domain.User) record {
 		ID:           u.ID,
 		Email:        u.Email,
 		PasswordHash: u.PasswordHash,
-		GoogleID:     u.GoogleID,
 		Name:         u.Name,
-		Active:       u.Active,
+		Role:         u.Role,
+		Status:       u.Status,
 		CreatedAt:    u.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:    u.UpdatedAt.Format(time.RFC3339),
 	}
-	// Only set GSI2 if user has Google ID
-	if u.GoogleID != "" {
-		rec.GSI2PK = googleIDPK(u.GoogleID)
-		rec.GSI2SK = "PROFILE"
+}
+
+// statusOf resolves the status of a record. Items written before the status attribute existed only
+// have active, and back then an inactive account could only mean a deactivated one.
+func statusOf(rec record) string {
+	switch {
+	case rec.Status != "":
+		return rec.Status
+	case rec.Active:
+		return domain.StatusActive
+	default:
+		return domain.StatusDeactivated
 	}
-	return rec
 }
 
 func unmarshal(item map[string]types.AttributeValue) (*domain.User, error) {
@@ -208,9 +242,9 @@ func unmarshal(item map[string]types.AttributeValue) (*domain.User, error) {
 		ID:           rec.ID,
 		Email:        rec.Email,
 		PasswordHash: rec.PasswordHash,
-		GoogleID:     rec.GoogleID,
 		Name:         rec.Name,
-		Active:       rec.Active,
+		Role:         rec.Role,
+		Status:       statusOf(rec),
 		CreatedAt:    createdAt,
 		UpdatedAt:    updatedAt,
 	}, nil

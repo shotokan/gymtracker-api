@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/shotokan/gymtracker-api/internal/user/domain"
 	"github.com/shotokan/gymtracker-api/internal/user/port/input"
 	"github.com/shotokan/gymtracker-api/internal/user/port/output"
 )
@@ -18,6 +19,11 @@ func NewUpdateProfile(repo output.UserRepository) input.UpdateProfileUseCase {
 
 // Execute realiza la actualización del perfil de usuario, encontrándolo por ID, llamando al método UpdateName de la entidad y actualizando el repositorio. Retorna el perfil actualizado o un error si ocurre algún problema durante el proceso.
 func (uc *updateProfileUseCase) Execute(ctx context.Context, cmd input.UpdateProfileCommand) (input.UpdateProfileResult, error) {
+	// Cada usuario solo puede editar su propio perfil
+	if cmd.ActorID != cmd.UserID {
+		return input.UpdateProfileResult{}, domain.ErrForbidden
+	}
+
 	u, err := uc.repo.FindByID(ctx, cmd.UserID)
 	if err != nil {
 		return input.UpdateProfileResult{}, fmt.Errorf("finding user: %w", err)

@@ -28,7 +28,8 @@ func TestRegisterUseCase_Execute_Success(t *testing.T) {
 			u.Email == "ivan@gym.com" &&
 			u.Name == "Ivan" &&
 			u.PasswordHash == "hashedPassword" &&
-			u.Active == true
+			u.Role == domain.RoleUser &&
+			u.Status == domain.StatusPending
 	})).Return(nil)
 
 	uc := NewRegister(repo, hasher, idGen)

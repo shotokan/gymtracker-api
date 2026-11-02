@@ -13,7 +13,7 @@ Hexagonal Architecture organizes code in layers where the **business logic** (do
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         EXTERNAL WORLD                           │
-│  (HTTP requests, databases, Google API, AWS services, etc.)     │
+│  (HTTP requests, databases, AWS services, etc.)                 │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -49,7 +49,7 @@ Hexagonal Architecture organizes code in layers where the **business logic** (do
                       ▼
          ┌────────────────────────────────────────┐
          │      SECONDARY ADAPTERS                │
-         │  (Outgoing: DynamoDB, bcrypt, Google)  │
+         │  (Outgoing: DynamoDB, bcrypt, JWT)     │
          └────────────────────────────────────────┘
 ```
 
@@ -85,8 +85,7 @@ internal/<module>/
     │
     └── secondary/            ← SECONDARY ADAPTERS (outgoing)
         ├── dynamo/          ← DynamoDB implementations
-        ├── bcrypt/          ← Password hashing
-        └── google/          ← Google API integration
+        └── bcrypt/          ← Password hashing
 ```
 
 ### Layer Responsibilities
@@ -176,11 +175,10 @@ internal/<module>/
 
 #### 5. **Secondary Adapters** (`adapter/secondary/`)
 - **What**: Implement output ports with real infrastructure
-- **Dependencies**: External libraries (AWS SDK, bcrypt, Google API, etc.)
+- **Dependencies**: External libraries (AWS SDK, bcrypt, JWT, etc.)
 - **Examples**:
   - `dynamo/user_repository.go` - Implements `UserRepository` using DynamoDB
   - `bcrypt/password_hasher.go` - Implements `PasswordHasher` using bcrypt
-  - `google/token_validator.go` - Implements `GoogleTokenValidator` using Google API
 - **Why separated**: Easy to swap implementations (e.g., DynamoDB → PostgreSQL)
 
 ### Module Examples
@@ -190,33 +188,28 @@ internal/<module>/
 ```
 internal/auth/
 ├── domain/
-│   ├── errors.go              # ErrInvalidCreds, ErrInvalidToken
-│   └── google_user.go         # GoogleUser entity
+│   ├── errors.go              # ErrInvalidCreds
 │
 ├── port/
 │   ├── input/
-│   │   └── auth_ports.go      # LoginUseCase, GoogleAuthUseCase interfaces
+│   │   └── auth_ports.go      # LoginUseCase interface
 │   │
 │   └── output/
 │       ├── user_repository.go      # User data access interface
-│       ├── password_hasher.go      # Password comparison interface
-│       └── google_validator.go     # Google token validation interface
+│       └── password_hasher.go      # Password comparison interface
 │
 ├── application/
 │   ├── login_use_case.go           # Email/password login logic
-│   ├── login_use_case_test.go      # Unit tests with mocks
-│   ├── google_auth_use_case.go     # Google OAuth logic
-│   └── google_auth_use_case_test.go
+│   └── login_use_case_test.go      # Unit tests with mocks
 │
 └── adapter/
     ├── primary/
-    │   ├── router.go               # Routes /auth/login and /auth/google
+    │   ├── router.go               # Routes /auth/login
     │   ├── login_handler.go        # Handles login HTTP requests
-    │   └── google_auth_handler.go  # Handles Google OAuth requests
+    │   └── helpers.go              # JSON response helpers
     │
     └── secondary/
         ├── bcrypt/password_hasher.go    # bcrypt implementation
-        ├── google/token_validator.go    # Google API integration
         └── jwt/token_generator.go       # JWT token generation
 ```
 
@@ -375,7 +368,7 @@ make deploy
 ```
 .
 ├── cmd/                      # Lambda entry points
-│   ├── auth/                 # Unified auth Lambda (login + Google OAuth)
+│   ├── auth/                 # Auth Lambda (email/password login)
 │   ├── authorizer/           # JWT authorizer
 │   ├── user/                 # User operations
 │   ├── plan/                 # Training plans
@@ -416,9 +409,12 @@ make diff            # Show infrastructure changes
 
 ## 🔐 Authentication
 
-The API supports two authentication methods:
+Access requires an account approved by an administrator:
 
-### 1. Email/Password
+1. `POST /v1/users` registers the account with status `pending`. It cannot log in yet.
+2. An administrator finds it with `GET /v1/users?status=pending` and approves it with `PATCH /v1/users/{id}/activate` (`204`; `403` if the caller is not an active admin).
+3. The user logs in with email and password:
+
 ```bash
 POST /v1/auth/login
 {
@@ -433,27 +429,34 @@ Response:
 }
 ```
 
-### 2. Google OAuth
-```bash
-POST /v1/auth/google
-{
-  "id_token": "google-id-token..."
-}
+### Account permissions
 
-Response:
-{
-  "user_id": "uuid",
-  "email": "user@gmail.com",
-  "name": "User Name",
-  "token": "eyJhbGciOiJIUzI1NiIs..."
-}
+| Endpoint | Who can call it |
+|----------|-----------------|
+| `GET /v1/users/{id}` | The account owner |
+| `PATCH /v1/users/{id}` | The account owner |
+| `DELETE /v1/users/{id}` | The account owner or an active admin (`409` for the last active admin) |
+| `GET /v1/users?status=pending` or `deactivated` | An active admin |
+| `PATCH /v1/users/{id}/activate` | An active admin |
+
+An account is `pending`, `active` or `deactivated`, and only `active` accounts can log in. `PATCH /v1/users/{id}/activate` also reactivates a deactivated account.
+
+### Creating the first administrator
+
+Register the account, then set its role directly in DynamoDB:
+
+```bash
+aws dynamodb update-item \
+  --table-name gym-tracker \
+  --key '{"PK":{"S":"USER#admin@example.com"},"SK":{"S":"PROFILE"}}' \
+  --update-expression "SET #r = :role, #s = :status" \
+  --expression-attribute-names '{"#r":"role","#s":"status"}' \
+  --expression-attribute-values '{":role":{"S":"admin"},":status":{"S":"active"}}'
 ```
 
 ## 📚 Additional Documentation
 
 - [Architecture Deep Dive](docs/AUTH_ARCHITECTURE.md)
-- [Auth Module Refactoring](docs/AUTH_REFACTORING.md)
-- [Google OAuth Setup](docs/GOOGLE_OAUTH_SETUP.md)
 
 ## 🧪 Testing
 
@@ -507,7 +510,7 @@ func TestLogin_Success(t *testing.T) {
 
 | Resource | Name | Purpose |
 |----------|------|---------|
-| Lambda | `gym-tracker-auth` | Email/password + Google OAuth |
+| Lambda | `gym-tracker-auth` | Email/password login |
 | Lambda | `gym-tracker-authorizer` | JWT validation |
 | Lambda | `gym-tracker-user` | User CRUD |
 | Lambda | `gym-tracker-plan` | Training plans |
@@ -515,7 +518,6 @@ func TestLogin_Success(t *testing.T) {
 | DynamoDB | `gym-tracker` | Single table for all data |
 | API Gateway | `gym-tracker-api` | REST API endpoints |
 | SSM Parameter | `/gym-tracker/jwt-secret` | JWT signing key |
-| SSM Parameter | `/gym-tracker/google-client-id` | Google OAuth client |
 
 ## 🤝 Contributing
 
